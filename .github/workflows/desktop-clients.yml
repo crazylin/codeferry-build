@@ -34,7 +34,7 @@ jobs:
           CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: |
           if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
-            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a fine-grained or classic PAT with contents:read on crazylin/codeferry. This repository does not create or contain that token."
+            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a PAT with contents:read and contents:write on the private repository crazylin/codeferry. This public repository does not create or contain that token, and it does not publish build outputs."
             exit 1
           fi
 
@@ -70,10 +70,96 @@ jobs:
           CODEFERRY_PACK_ARCH: ${{ matrix.pack_arch }}
         run: npm run package
 
-      - name: Upload desktop package
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Pack a single archive
+        shell: bash
+        env:
+          PACK_PLATFORM: ${{ matrix.pack_platform }}
+          PACK_ARCH: ${{ matrix.pack_arch }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          archive="CodeFerry-${PACK_PLATFORM}-${PACK_ARCH}-${tag}.tar.gz"
+          tar -C source/artifacts -czf "${archive}" .
+          test -s "${archive}"
+
+      - name: Upload archive to the private repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          PACK_PLATFORM: ${{ matrix.pack_platform }}
+          PACK_ARCH: ${{ matrix.pack_arch }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          archive="CodeFerry-${PACK_PLATFORM}-${PACK_ARCH}-${tag}.tar.gz"
+          bash .github/scripts/publish-private-asset.sh "${tag}" "${archive}"
+
+  gateway:
+    name: Gateway image (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Require CODEFERRY_SOURCE_TOKEN
+        shell: bash
+        env:
+          CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
+            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a PAT with contents:read and contents:write on the private repository crazylin/codeferry."
+            exit 1
+          fi
+
+      - name: Checkout workflow repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          name: CodeFerry-${{ matrix.pack_platform }}-${{ matrix.pack_arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: source/artifacts/
-          if-no-files-found: error
-          overwrite: false
+          persist-credentials: false
+
+      - name: Checkout private source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: crazylin/codeferry
+          ref: main
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Setup Rust 1.96.0
+        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58 # pinned action implementation
+        with:
+          toolchain: 1.96.0
+
+      - name: Build the gateway and native Server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path source/gateway-rs/Cargo.toml --release --locked
+          commit="$(python3 -c 'import json; print(json.load(open("source/upstream/baseline.json"))["commit"])')"
+          git clone --branch v0.4.5 --depth 1 https://github.com/yyjeqhc/webcodex.git native
+          test "$(git -C native rev-parse HEAD)" = "${commit}"
+          git -C native apply "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
+          cargo build --manifest-path native/Cargo.toml --locked --profile dogfood --bin webcodex-server -p webcodex
+
+      - name: Build the runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          context="${RUNNER_TEMP}/gateway-image"
+          mkdir -p "${context}/runtime/public"
+          cp source/gateway-rs/target/release/codeferry-gateway "${context}/runtime/codeferry-gateway"
+          cp native/target/dogfood/webcodex-server "${context}/runtime/webcodex-server"
+          cp -a source/public/. "${context}/runtime/public/"
+          cp source/deploy/1panel/Dockerfile "${context}/Dockerfile"
+          cp /etc/ssl/certs/ca-certificates.crt "${context}/ca-certificates.crt"
+          docker build -t "codeferry-gateway:${tag}" "${context}"
+          docker save "codeferry-gateway:${tag}" | gzip -1 > "codeferry-gateway-${tag}.tar.gz"
+          test -s "codeferry-gateway-${tag}.tar.gz"
+
+      - name: Upload image to the private repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          bash .github/scripts/publish-private-asset.sh "${tag}" "codeferry-gateway-${tag}.tar.gz"
