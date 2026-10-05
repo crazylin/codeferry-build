@@ -80,7 +80,7 @@ jobs:
           git -C source/upstream/webcodex apply "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
           test -f source/upstream/webcodex/LICENSE
 
-      - name: Build the host CLI and Runner
+      - name: Build the host Runner
         shell: bash
         env:
           PACK_PLATFORM: ${{ matrix.pack_platform }}
@@ -109,10 +109,11 @@ jobs:
           unset WEBCODEX_BUILT_AT SOURCE_DATE_EPOCH || true
           export WEBCODEX_GIT_COMMIT="${revision}"
           export WEBCODEX_GIT_DIRTY="${dirty}"
-          # Server identity is recorded in BUILD_INFO. Only the CLI and Runner are packaged.
+          # Server identity is recorded in BUILD_INFO. The Runner is installed as
+          # codeferry-runner. The desktop does not package the WebCodex CLI.
           cargo build --manifest-path "${upstream}/Cargo.toml" --locked --profile dogfood \
-            -p webcodex -p webcodex-cli -p webcodex-runner \
-            --bin webcodex-server --bin webcodex --bin webcodex-runner
+            -p webcodex -p webcodex-runner \
+            --bin webcodex-server --bin webcodex-runner
 
       - name: Write the host runtime
         shell: bash

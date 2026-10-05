@@ -1,8 +1,10 @@
 // Prepare the host Runner for desktop packaging.
-// matchingRuntime() accepts runtime/<platform>-<arch>/BUILD_INFO.json.
-// electron-packager then copies that directory under its basename, while the
-// client and the packager's own hash check read resources/runtime. After the
-// platform check, an identical directory named runtime is what gets packaged.
+// The cargo binary stays webcodex-runner. The file installed for the desktop is
+// codeferry-runner. The WebCodex CLI is not built or packaged.
+// A checkout that still names webcodex and webcodex-runner is pointed at
+// codeferry-runner, and a missing package author is filled in because the
+// Windows packager requires it. Attribution files already in runtime/ are copied
+// into the platform directory.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -19,8 +21,9 @@ const TARGETS = {
   'win32:x64': 'x86_64-pc-windows-msvc',
   'win32:arm64': 'aarch64-pc-windows-msvc',
 };
-const BUILT_BINARIES = ['webcodex-server', 'webcodex', 'webcodex-runner'];
-const PACKAGED_BINARIES = ['webcodex', 'webcodex-runner'];
+const BUILT_BINARIES = ['webcodex-server', 'webcodex-runner'];
+const RUNNER_IDENTITY = 'webcodex-runner';
+const SHIPPED_RUNNER = 'codeferry-runner';
 
 function arg(name) {
   const index = process.argv.indexOf(name);
@@ -118,6 +121,13 @@ async function assertRuntimeAbsent(directory) {
   }
 }
 
+async function copyIfExists(from, to, options = {}) {
+  try { await access(from); }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  await cp(from, to, options);
+  return true;
+}
+
 async function copyBinary(from, to) {
   await copyFile(from, to);
   if (process.platform !== 'win32') {
@@ -140,7 +150,7 @@ if (!expectedTarget) throw new Error(`UNSUPPORTED_RUNTIME:${platform}/${arch}`);
 
 const runtimeRoot = join(sourceRoot, 'runtime');
 const runtimeDir = join(runtimeRoot, `${platform}-${arch}`);
-await assertRuntimeAbsent(runtimeRoot);
+await assertRuntimeAbsent(runtimeDir);
 
 const baseline = JSON.parse(await readFile(join(sourceRoot, 'upstream', 'baseline.json'), 'utf8'));
 if (!/^[a-f0-9]{40}$/u.test(baseline.commit) || !/^v\d+\.\d+\.\d+$/u.test(baseline.ref) ||
@@ -169,12 +179,14 @@ if (built['webcodex-server'].agent_protocol_generation !== built['webcodex-runne
 }
 
 await mkdir(runtimeDir, { recursive: true });
-const files = {};
-for (const binary of PACKAGED_BINARIES) {
-  const name = binaryFileName(binary, platform);
-  await copyBinary(join(builtDir, name), join(runtimeDir, name));
-  files[binary] = hashes[binary];
+const shippedName = binaryFileName(SHIPPED_RUNNER, platform);
+await copyBinary(join(builtDir, binaryFileName(RUNNER_IDENTITY, platform)), join(runtimeDir, shippedName));
+await copyFile(join(upstream, 'LICENSE'), join(runtimeDir, 'WEBCODEX_LICENSE'));
+for (const notice of ['THIRD_PARTY_NOTICES.md', 'dependencies.json']) {
+  await copyIfExists(join(runtimeRoot, notice), join(runtimeDir, notice));
 }
+await copyIfExists(join(runtimeRoot, 'licenses'), join(runtimeDir, 'licenses'), { recursive: true });
+const files = { [SHIPPED_RUNNER]: hashes[RUNNER_IDENTITY] };
 const buildInfo = {
   product: 'CodeFerry Preview',
   upstream: baseline,
@@ -190,10 +202,8 @@ const buildInfo = {
   server: { sha256: hashes['webcodex-server'], buildInfo: built['webcodex-server'] },
 };
 await writeFile(join(runtimeDir, 'BUILD_INFO.json'), `${JSON.stringify(buildInfo, null, 2)}\n`, { flag: 'wx' });
-for (const binary of PACKAGED_BINARIES) {
-  if (await fileDigest(join(runtimeDir, binaryFileName(binary, platform))) !== files[binary]) {
-    throw new Error('NATIVE_BUILD_COPY_CHANGED');
-  }
+if (await fileDigest(join(runtimeDir, shippedName)) !== files[SHIPPED_RUNNER]) {
+  throw new Error('NATIVE_BUILD_COPY_CHANGED');
 }
 
 const staged = join(stageParent, 'runtime');
@@ -203,19 +213,26 @@ if (basename(staged) !== 'runtime' || staged === sourceRoot || staged.startsWith
 await rm(staged, { recursive: true, force: true });
 await mkdir(stageParent, { recursive: true });
 await cp(runtimeDir, staged, { recursive: true });
-for (const binary of PACKAGED_BINARIES) {
-  const name = binaryFileName(binary, platform);
-  if (process.platform !== 'win32') await chmod(join(staged, name), 0o755);
-  if (await fileDigest(join(staged, name)) !== files[binary]) throw new Error('NATIVE_BUILD_COPY_CHANGED');
-}
+if (process.platform !== 'win32') await chmod(join(staged, shippedName), 0o755);
+if (await fileDigest(join(staged, shippedName)) !== files[SHIPPED_RUNNER]) throw new Error('NATIVE_BUILD_COPY_CHANGED');
 
 const packagePath = join(sourceRoot, 'desktop', 'scripts', 'package.mjs');
+const oldNames = "const binaryNames = platform === 'win32' ? ['webcodex.exe', 'webcodex-runner.exe'] : ['webcodex', 'webcodex-runner'];";
+const shippedNames = "const binaryNames = platform === 'win32' ? ['codeferry-runner.exe'] : ['codeferry-runner'];";
 const needle = 'extraResource: [runtime],';
-const replacement = `extraResource: [${JSON.stringify(staged)}],`;
-const original = await readFile(packagePath, 'utf8');
-if (!original.includes(needle)) throw new Error('PACKAGER_RESOURCE_LINE_MISSING');
-const patched = original.replace(needle, replacement);
-if (patched.includes(needle) || !patched.includes(replacement)) throw new Error('PACKAGER_RESOURCE_LINE_AMBIGUOUS');
-await writeFile(packagePath, patched);
+let original = await readFile(packagePath, 'utf8');
+if (original.includes(oldNames)) original = original.replace(oldNames, shippedNames);
+if (original.includes(needle)) {
+  const replacement = `extraResource: [${JSON.stringify(staged)}],`;
+  original = original.replace(needle, replacement);
+  if (original.includes(needle) || !original.includes(replacement)) throw new Error('PACKAGER_RESOURCE_LINE_AMBIGUOUS');
+}
+await writeFile(packagePath, original);
 execFileSync(process.execPath, ['--check', packagePath], { stdio: 'inherit' });
-console.log(`runtime ${platform}-${arch} target=${expectedTarget} revision=${source.revision}`);
+const manifestPath = join(sourceRoot, 'desktop', 'package.json');
+const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+if (typeof manifest.author !== 'string' || manifest.author.length === 0) {
+  manifest.author = 'CodeFerry';
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+console.log(`runtime ${platform}-${arch} runner=${shippedName} target=${expectedTarget} revision=${source.revision}`);
