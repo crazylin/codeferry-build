@@ -2,236 +2,353 @@ name: Desktop clients
 
 on:
   workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Optional exact 40-character commit from the private source repository
+        required: false
+        type: string
+      deploy_gateway:
+        description: Deploy the verified gateway after all platforms pass
+        required: true
+        type: boolean
+        default: true
+      release_scope:
+        description: Publish complete Tauri clients and gateway, or only the gateway
+        required: true
+        type: choice
+        options: [all, gateway]
+        default: gateway
   push:
-    branches:
-      - master
+    branches: [master]
 
 permissions:
   contents: read
+concurrency:
+  group: codeferry-release-publication
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_JOBS: '2'
 
 jobs:
+  resolve:
+    name: Resolve one immutable private source commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Validate requested commit
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED_COMMIT" ] && ! [[ "$REQUESTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo 'SOURCE_COMMIT_MUST_BE_EXACT_SHA'; exit 1
+          fi
+          git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ inputs.source_commit || 'main' }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - id: source
+        name: Verify immutable source identity
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          sha="$(git -C source rev-parse HEAD)"
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+          git -C source cat-file -e "${sha}^{commit}"
+          if [ -n "$REQUESTED_COMMIT" ] && [ "$sha" != "$REQUESTED_COMMIT" ]; then exit 1; fi
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          echo 'IMMUTABLE_SOURCE_RESOLVED'
+
+  validate:
+    name: Contracts and real PostgreSQL Redis validation
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      TEST_DATABASE_URL: postgres://codeferry:fixture-ci-password@127.0.0.1:5432/codeferry
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+    services:
+      postgres:
+        image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: codeferry
+          POSTGRES_PASSWORD: fixture-ci-password
+          POSTGRES_DB: codeferry
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U codeferry -d codeferry"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Validate workflow publishing contracts
+        run: node --test .github/scripts/tests/*.test.mjs
+      - name: Install locked source dependencies
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-dependencies npm ci
+      - name: Test TypeScript contracts
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-contracts npm test
+      - name: Install locked desktop dependencies
+        working-directory: source/desktop
+        env: {ELECTRON_SKIP_BINARY_DOWNLOAD: '1'}
+        run: node ../../.github/scripts/ci-task.mjs desktop-dependencies npm ci
+      - name: Test desktop TypeScript contracts
+        working-directory: source/desktop
+        run: node ../../.github/scripts/ci-task.mjs desktop-contracts npm test
+      - name: Reproduce reviewed native patch before any Cargo build
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Validate native formatting and authorization
+        working-directory: source/upstream/webcodex
+        run: |
+          node ../../../.github/scripts/ci-task.mjs native-format cargo fmt --all --check
+          node ../../../.github/scripts/ci-task.mjs native-auth cargo test --locked -p webcodex --lib auth::
+          node ../../../.github/scripts/ci-task.mjs native-embedding cargo test --locked -p webcodex --lib embedded
+          node ../../../.github/scripts/ci-task.mjs native-drain cargo test --locked -p webcodex --lib server_shutdown
+      - name: Test gateway with real isolated PostgreSQL and Redis
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --include-ignored
+      - name: Test host update worker migration and identity contracts
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs gateway-worker python3 -m unittest discover -s scripts/test -p release_worker_test.py
+
+  prepare-release:
+    name: Create one private immutable build draft
+    needs: [resolve, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - name: Create private draft only after validation passes
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: bash .github/scripts/prepare-private-release.sh
+
   package:
-    name: ${{ matrix.os }} (${{ matrix.pack_platform }}/${{ matrix.pack_arch }})
+    name: Signed Tauri desktop ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: [resolve, validate, prepare-release]
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_scope == 'all' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      CODEFERRY_PACK_PLATFORM: ${{ matrix.platform }}
+      CODEFERRY_PACK_ARCH: ${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            pack_platform: darwin
-            pack_arch: arm64
-          - os: windows-latest
-            pack_platform: win32
-            pack_arch: x64
-          - os: ubuntu-latest
-            pack_platform: linux
-            pack_arch: x64
+          - {os: macos-15, platform: darwin, arch: arm64, runner: 'codeferry-runner', bundles: 'app,dmg'}
+          - {os: windows-2025, platform: win32, arch: x64, runner: 'codeferry-runner.exe', bundles: 'nsis'}
+          - {os: ubuntu-24.04, platform: linux, arch: x64, runner: 'codeferry-runner', bundles: 'appimage,deb'}
     steps:
-      - name: Require CODEFERRY_SOURCE_TOKEN
-        shell: bash
-        env:
-          CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - shell: bash
         run: |
-          if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
-            echo "::error::MISSING_CODEFERRY_SOURCE_TOKEN"
-            exit 1
-          fi
-
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-
-      - name: Checkout source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+          git config --global core.autocrlf false
+          printf 'ASSET_DIR=%s/release-assets\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: crazylin/codeferry
-          ref: main
+          ref: ${{ needs.resolve.outputs.source_sha }}
           token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           path: source
           persist-credentials: false
-
-      - name: Setup Rust 1.96.0
-        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
-        with:
-          toolchain: 1.96.0
-
-      - name: Setup Node.js 22.13.x
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22.13.x
-
-      - name: Clone WebCodex and apply the baseline patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git -C source config core.autocrlf false
-          git -C source checkout --force HEAD
-          if grep -q $'\r' source/upstream/remotemcp.patch; then
-            echo "::error::PATCH_HAS_CRLF"
-            exit 1
-          fi
-          commit="$(node -e 'const b=require("./source/upstream/baseline.json"); if(!/^[a-f0-9]{40}$/.test(b.commit)||b.ref!=="v"+b.version||b.repository!=="https://github.com/yyjeqhc/webcodex.git"){console.error("INVALID_BASELINE"); process.exit(1)} process.stdout.write(b.commit)')"
-          git -c core.autocrlf=false clone -c core.autocrlf=false -c core.eol=lf --branch v0.4.5 --depth 1 https://github.com/yyjeqhc/webcodex.git source/upstream/webcodex
-          test "$(git -C source/upstream/webcodex rev-parse HEAD)" = "${commit}"
-          test "$(git -C source/upstream/webcodex rev-parse 'v0.4.5^{commit}')" = "${commit}"
-          git -C source/upstream/webcodex apply --check "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
-          git -C source/upstream/webcodex apply "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
-          test -f source/upstream/webcodex/LICENSE
-
-      - name: Build the host Runner
-        shell: bash
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Install locked workspace dependencies
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs workspace-dependencies npm ci
+      - name: Prepare reviewed native source
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Build and verify host Runner using authoritative source script
+        env: {CODEFERRY_NATIVE_PROFILE: 'release'}
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs native-runtime node scripts/native-build.mjs
+      - name: Install Linux native WebView build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libsecret-1-dev
+      - name: Install locked React and Tauri dependencies
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-dependencies npm ci
+      - name: Typecheck and test complete Rust client
+        working-directory: source/desktop-tauri
         env:
-          PACK_PLATFORM: ${{ matrix.pack_platform }}
-          PACK_ARCH: ${{ matrix.pack_arch }}
+          CODEFERRY_TEST_RUNNER: ${{ github.workspace }}/source/runtime/${{ matrix.runner }}
         run: |
-          set -euo pipefail
-          host="$(rustc -vV | awk '/^host: /{print $2}')"
-          case "${PACK_PLATFORM}:${PACK_ARCH}:${host}" in
-            darwin:arm64:aarch64-apple-darwin) ;;
-            linux:x64:x86_64-unknown-linux-gnu) ;;
-            win32:x64:x86_64-pc-windows-msvc) ;;
-            *) echo "::error::RUST_HOST_MISMATCH ${host}"; exit 1 ;;
-          esac
-          upstream="source/upstream/webcodex"
-          revision="$(git -C "${upstream}" rev-parse HEAD)"
-          if [ -n "$(git -C "${upstream}" status --porcelain --untracked-files=all)" ]; then
-            dirty=true
-          else
-            dirty=false
-          fi
-          while IFS= read -r name; do
-            case "${name}" in
-              WEBCODEX_GIT_*|WEBCODEX_BUILD_*) unset "${name}" || true ;;
-            esac
-          done < <(env | awk -F= '{print $1}')
-          unset WEBCODEX_BUILT_AT SOURCE_DATE_EPOCH || true
-          export WEBCODEX_GIT_COMMIT="${revision}"
-          export WEBCODEX_GIT_DIRTY="${dirty}"
-          # Server identity is recorded in BUILD_INFO. The Runner is installed as
-          # codeferry-runner. The desktop does not package the WebCodex CLI.
-          cargo build --manifest-path "${upstream}/Cargo.toml" --locked --profile dogfood \
-            -p webcodex -p webcodex-runner \
-            --bin webcodex-server --bin webcodex-runner
-
-      - name: Write the host runtime
-        shell: bash
+          node ../../.github/scripts/ci-task.mjs tauri-types npm run typecheck
+          node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked -- --include-ignored
+      - name: Verify Unix provider cleanup with the actual Runner
+        if: runner.os != 'Windows'
+        run: node .github/scripts/ci-task.mjs tauri-provider-guard python3 source/desktop-tauri/scripts/runner_guard_fixture.py
+      - name: Verify macOS native browser isolation and IPC
+        if: runner.os == 'macOS'
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-native-browser npm run test:browser
+      - name: Stage verified Runner and legal notices
+        run: node .github/scripts/ci-task.mjs tauri-resources node .github/scripts/tauri-resources.mjs
+      - name: Build official signed platform bundle
+        working-directory: source/desktop-tauri
         env:
-          PACK_PLATFORM: ${{ matrix.pack_platform }}
-          PACK_ARCH: ${{ matrix.pack_arch }}
-        run: |
-          set -euo pipefail
-          node .github/scripts/stage-desktop-runtime.mjs \
-            --source source \
-            --upstream source/upstream/webcodex \
-            --platform "${PACK_PLATFORM}" \
-            --arch "${PACK_ARCH}" \
-            --stage "${RUNNER_TEMP}/desktop-runtime"
-
-      - name: Install locked desktop dependencies
-        working-directory: source/desktop
-        run: |
-          npm ci
-          node node_modules/electron/install.js
-
-      - name: Package desktop client
-        working-directory: source/desktop
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node ../../.github/scripts/ci-task.mjs tauri-bundle npx tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.json
+      - name: Seal macOS app and rebuild signed updater and DMG artifacts
+        if: runner.os == 'macOS'
         env:
-          CODEFERRY_PACK_PLATFORM: ${{ matrix.pack_platform }}
-          CODEFERRY_PACK_ARCH: ${{ matrix.pack_arch }}
-        run: npm run package
-
-      - name: Pack a single archive
-        shell: bash
-        env:
-          PACK_PLATFORM: ${{ matrix.pack_platform }}
-          PACK_ARCH: ${{ matrix.pack_arch }}
-        run: |
-          set -euo pipefail
-          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          archive="CodeFerry-${PACK_PLATFORM}-${PACK_ARCH}-${tag}.tar.gz"
-          tar -C source/artifacts -czf "${archive}" .
-          test -s "${archive}"
-
-      - name: Upload archive
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node .github/scripts/ci-task.mjs tauri-macos-finalize node source/scripts/finalize-macos-package.mjs
+      - name: Verify official updater signatures and collect installer artifacts
+        run: node .github/scripts/ci-task.mjs collect-tauri node .github/scripts/assets.mjs tauri source
+      - name: Upload verified assets only to private build release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
-          PACK_PLATFORM: ${{ matrix.pack_platform }}
-          PACK_ARCH: ${{ matrix.pack_arch }}
-        run: |
-          set -euo pipefail
-          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          archive="CodeFerry-${PACK_PLATFORM}-${PACK_ARCH}-${tag}.tar.gz"
-          bash .github/scripts/publish-private-asset.sh "${tag}" "${archive}"
+        run: bash .github/scripts/publish-private-asset.sh "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$ASSET_DIR"
 
   gateway:
-    name: Gateway image (linux/amd64)
-    runs-on: ubuntu-latest
+    name: Embedded gateway Docker image linux amd64
+    needs: [resolve, validate, prepare-release]
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
-    steps:
-      - name: Require CODEFERRY_SOURCE_TOKEN
-        shell: bash
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+    services:
+      postgres:
+        image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
         env:
-          CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          POSTGRES_USER: codeferry
+          POSTGRES_PASSWORD: fixture-ci-password
+          POSTGRES_DB: codeferry
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U codeferry -d codeferry"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - shell: bash
         run: |
-          if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
-            echo "::error::MISSING_CODEFERRY_SOURCE_TOKEN"
-            exit 1
-          fi
-
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-
-      - name: Checkout source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+          git config --global core.autocrlf false
+          printf 'ASSET_DIR=%s/release-assets\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: crazylin/codeferry
-          ref: main
+          ref: ${{ needs.resolve.outputs.source_sha }}
           token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           path: source
           persist-credentials: false
-
-      - name: Setup Rust 1.96.0
-        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
-        with:
-          toolchain: 1.96.0
-
-      - name: Build the gateway and native Server
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Prepare native dependency before building gateway
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Build embedded gateway from the immutable source
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs gateway-build cargo build --manifest-path gateway-rs/Cargo.toml --release --locked
+      - name: Build labeled runtime image with complete license disclosure
+        run: node .github/scripts/ci-task.mjs gateway-image node .github/scripts/gateway-image.mjs
+      - name: Verify actual Linux image startup website and graceful native drain
+        run: node .github/scripts/ci-task.mjs gateway-image-smoke node .github/scripts/gateway-smoke.mjs
+      - name: Save immutable Docker image archive
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --manifest-path source/gateway-rs/Cargo.toml --release --locked
-          commit="$(python3 -c 'import json; print(json.load(open("source/upstream/baseline.json"))["commit"])')"
-          git clone --branch v0.4.5 --depth 1 https://github.com/yyjeqhc/webcodex.git native
-          test "$(git -C native rev-parse HEAD)" = "${commit}"
-          git -C native apply "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
-          cargo build --manifest-path native/Cargo.toml --locked --profile dogfood --bin webcodex-server -p webcodex
-
-      - name: Build the runtime image
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          context="${RUNNER_TEMP}/gateway-image"
-          mkdir -p "${context}/runtime/public"
-          cp source/gateway-rs/target/release/codeferry-gateway "${context}/runtime/codeferry-gateway"
-          cp native/target/dogfood/webcodex-server "${context}/runtime/webcodex-server"
-          cp -a source/public/. "${context}/runtime/public/"
-          cp source/deploy/1panel/Dockerfile "${context}/Dockerfile"
-          cp /etc/ssl/certs/ca-certificates.crt "${context}/ca-certificates.crt"
-          docker build -t "codeferry-gateway:${tag}" "${context}"
-          docker save "codeferry-gateway:${tag}" | gzip -1 > "codeferry-gateway-${tag}.tar.gz"
-          test -s "codeferry-gateway-${tag}.tar.gz"
-
-      - name: Upload image
+          mkdir -p "$ASSET_DIR"
+          version="$(node -e 'const fs=require("fs"); const t=fs.readFileSync("source/gateway-rs/Cargo.toml","utf8");const v=t.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"/m)?.[1];if(!v)process.exit(1);process.stdout.write(v)')"
+          image="$(cat "$RUNNER_TEMP/gateway-tag")"
+          asset="$ASSET_DIR/CodeFerry-gateway-${version}-linux-x64.tar.gz"
+          test ! -e "$asset"
+          (set -o noclobber; docker save "$image" | gzip -1 > "$asset")
+      - name: Validate saved image using production updater inspection
+        run: node .github/scripts/ci-task.mjs gateway-archive node .github/scripts/collect-gateway.mjs
+      - name: Upload image only to private build release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: bash .github/scripts/publish-private-asset.sh "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$ASSET_DIR"
+
+  publish:
+    name: Publish verified release set and update gateway
+    needs: [resolve, validate, package, gateway]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.validate.result == 'success' && needs.gateway.result == 'success' && (needs.package.result == 'success' || (needs.package.result == 'skipped' && inputs.release_scope == 'gateway')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      DEPLOY_GATEWAY: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_gateway }}
+      CLIENT_ENGINE: tauri
+      RELEASE_SCOPE: ${{ inputs.release_scope || 'all' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - shell: bash
         run: |
-          set -euo pipefail
-          tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          bash .github/scripts/publish-private-asset.sh "${tag}" "codeferry-gateway-${tag}.tar.gz"
+          git config --global core.autocrlf false
+          printf 'ASSET_DIR=%s/release-assets\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - name: Download private assets after every matrix build passes
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          mkdir -p "$ASSET_DIR"
+          gh release download "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --repo crazylin/codeferry --dir "$ASSET_DIR"
+      - name: Verify all hashes publish server assets and await gateway deployment
+        env:
+          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+        run: node .github/scripts/publish-server.mjs
+      - name: Finalize private build release
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: gh release edit "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --repo crazylin/codeferry --draft=false

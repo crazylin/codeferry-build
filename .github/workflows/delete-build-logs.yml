@@ -11,7 +11,7 @@ permissions:
 jobs:
   delete-build-logs:
     name: Delete build logs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Delete the completed desktop client run
         shell: bash

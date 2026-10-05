@@ -1,0 +1,22 @@
+[
+  {
+    "family": "salvo",
+    "version": "0.93.0",
+    "repository": "https://github.com/salvo-rs/salvo",
+    "commit": "1471006d8cd471e52abbf518bf8c296b8ad527c5",
+    "path": "LICENSE",
+    "file": "salvo-0.93.0-LICENSE",
+    "sha256": "ef11602db9903d2764cb2da58ca737cb722719cdabcb1236e5e7f612c59bee5d",
+    "source": "https://raw.githubusercontent.com/salvo-rs/salvo/1471006d8cd471e52abbf518bf8c296b8ad527c5/LICENSE"
+  },
+  {
+    "family": "str-buf",
+    "version": "3.0.3",
+    "repository": "https://github.com/DoumanAsh/str-buf",
+    "commit": "84e7af6584700cb8095d28d88838399b8ff71b99",
+    "path": "LICENSE",
+    "file": "str-buf-3.0.3-LICENSE",
+    "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "source": "https://raw.githubusercontent.com/DoumanAsh/str-buf/84e7af6584700cb8095d28d88838399b8ff71b99/LICENSE"
+  }
+]
