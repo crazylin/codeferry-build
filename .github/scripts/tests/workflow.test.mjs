@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const text = await readFile(join(repo, '.github/workflows/desktop-clients.yml'), 'utf8');
+const cleanup = await readFile(join(repo, '.github/workflows/delete-build-logs.yml'), 'utf8');
 function job(name) { const match = text.match(new RegExp('^  ' + name + ':\\n([\\s\\S]*?)(?=^  [a-z-]+:|$(?![\\s\\S]))', 'm')); assert.ok(match, name); return match[1]; }
+
+test('successful build cleanup removes logs without deleting run status or failed diagnostics', () => {
+  assert.ok(cleanup.includes("if: ${{ github.event.workflow_run.conclusion == 'success' }}"));
+  const runCommands = cleanup.split('\n').filter(line => line.trimStart().startsWith('run:'));
+  assert.deepEqual(runCommands, ['        run: gh api --method DELETE /repos/crazylin/codeferry-build/actions/runs/${{ github.event.workflow_run.id }}/logs']);
+});
 
 test('workflow pins platforms, Node, Rust, actions and one immutable source revision', () => {
   assert.match(text, /ubuntu-24\.04/); assert.match(text, /windows-2025/); assert.match(text, /macos-15/);

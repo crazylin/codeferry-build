@@ -11,10 +11,11 @@ permissions:
 jobs:
   delete-build-logs:
     name: Delete build logs
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Delete the completed desktop client run
+      - name: Delete logs for the successful desktop client run
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api --method DELETE /repos/crazylin/codeferry-build/actions/runs/${{ github.event.workflow_run.id }}
+        run: gh api --method DELETE /repos/crazylin/codeferry-build/actions/runs/${{ github.event.workflow_run.id }}/logs
