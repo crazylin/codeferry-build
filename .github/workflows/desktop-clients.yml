@@ -13,7 +13,7 @@ jobs:
   package:
     name: ${{ matrix.os }} (${{ matrix.pack_platform }}/${{ matrix.pack_arch }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -52,10 +52,81 @@ jobs:
           path: source
           persist-credentials: false
 
+      - name: Setup Rust 1.96.0
+        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with:
+          toolchain: 1.96.0
+
       - name: Setup Node.js 22.13.x
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.13.x
+
+      - name: Clone WebCodex and apply the baseline patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C source config core.autocrlf false
+          git -C source checkout --force HEAD
+          if grep -q $'\r' source/upstream/remotemcp.patch; then
+            echo "::error::PATCH_HAS_CRLF"
+            exit 1
+          fi
+          commit="$(node -e 'const b=require("./source/upstream/baseline.json"); if(!/^[a-f0-9]{40}$/.test(b.commit)||b.ref!=="v"+b.version||b.repository!=="https://github.com/yyjeqhc/webcodex.git"){console.error("INVALID_BASELINE"); process.exit(1)} process.stdout.write(b.commit)')"
+          git -c core.autocrlf=false clone -c core.autocrlf=false -c core.eol=lf --branch v0.4.5 --depth 1 https://github.com/yyjeqhc/webcodex.git source/upstream/webcodex
+          test "$(git -C source/upstream/webcodex rev-parse HEAD)" = "${commit}"
+          test "$(git -C source/upstream/webcodex rev-parse 'v0.4.5^{commit}')" = "${commit}"
+          git -C source/upstream/webcodex apply --check "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
+          git -C source/upstream/webcodex apply "${GITHUB_WORKSPACE}/source/upstream/remotemcp.patch"
+          test -f source/upstream/webcodex/LICENSE
+
+      - name: Build the host CLI and Runner
+        shell: bash
+        env:
+          PACK_PLATFORM: ${{ matrix.pack_platform }}
+          PACK_ARCH: ${{ matrix.pack_arch }}
+        run: |
+          set -euo pipefail
+          host="$(rustc -vV | awk '/^host: /{print $2}')"
+          case "${PACK_PLATFORM}:${PACK_ARCH}:${host}" in
+            darwin:arm64:aarch64-apple-darwin) ;;
+            linux:x64:x86_64-unknown-linux-gnu) ;;
+            win32:x64:x86_64-pc-windows-msvc) ;;
+            *) echo "::error::RUST_HOST_MISMATCH ${host}"; exit 1 ;;
+          esac
+          upstream="source/upstream/webcodex"
+          revision="$(git -C "${upstream}" rev-parse HEAD)"
+          if [ -n "$(git -C "${upstream}" status --porcelain --untracked-files=all)" ]; then
+            dirty=true
+          else
+            dirty=false
+          fi
+          while IFS= read -r name; do
+            case "${name}" in
+              WEBCODEX_GIT_*|WEBCODEX_BUILD_*) unset "${name}" || true ;;
+            esac
+          done < <(env | awk -F= '{print $1}')
+          unset WEBCODEX_BUILT_AT SOURCE_DATE_EPOCH || true
+          export WEBCODEX_GIT_COMMIT="${revision}"
+          export WEBCODEX_GIT_DIRTY="${dirty}"
+          # Server identity is recorded in BUILD_INFO. Only the CLI and Runner are packaged.
+          cargo build --manifest-path "${upstream}/Cargo.toml" --locked --profile dogfood \
+            -p webcodex -p webcodex-cli -p webcodex-runner \
+            --bin webcodex-server --bin webcodex --bin webcodex-runner
+
+      - name: Write the host runtime
+        shell: bash
+        env:
+          PACK_PLATFORM: ${{ matrix.pack_platform }}
+          PACK_ARCH: ${{ matrix.pack_arch }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/stage-desktop-runtime.mjs \
+            --source source \
+            --upstream source/upstream/webcodex \
+            --platform "${PACK_PLATFORM}" \
+            --arch "${PACK_ARCH}" \
+            --stage "${RUNNER_TEMP}/desktop-runtime"
 
       - name: Install locked desktop dependencies
         working-directory: source/desktop
