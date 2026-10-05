@@ -1,0 +1,20 @@
+name: Delete build logs
+
+on:
+  workflow_run:
+    workflows: ["Desktop clients"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  delete-build-logs:
+    name: Delete build logs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the completed desktop client run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method DELETE /repos/crazylin/codeferry-build/actions/runs/${{ github.event.workflow_run.id }}
