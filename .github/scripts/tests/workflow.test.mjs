@@ -40,6 +40,8 @@ test('all builds and actual database/native tests precede publisher key access',
   assert.match(job('package'), /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
   assert.doesNotMatch(job('publish'), /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(job('package'), /tauri build --bundles/);
+  assert.match(job('package'), /platform: darwin, arch: arm64, runner: 'codeferry-runner', bundles: 'app'/);
+  assert.ok(job('package').indexOf('tauri build --bundles') < job('package').indexOf('finalize-macos-package.mjs'));
   assert.match(job('package'), /cargo test --manifest-path src-tauri\/Cargo.toml --locked/);
   assert.doesNotMatch(job('package'), /electron|slim|npm run package/);
   assert.match(job('publish'), /needs\.package\.result == 'success'/);
