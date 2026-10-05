@@ -1,0 +1,79 @@
+name: Desktop clients
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.os }} (${{ matrix.pack_platform }}/${{ matrix.pack_arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            pack_platform: darwin
+            pack_arch: arm64
+          - os: windows-latest
+            pack_platform: win32
+            pack_arch: x64
+          - os: ubuntu-latest
+            pack_platform: linux
+            pack_arch: x64
+    steps:
+      - name: Require CODEFERRY_SOURCE_TOKEN
+        shell: bash
+        env:
+          CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
+            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a fine-grained or classic PAT with contents:read on crazylin/codeferry. This repository does not create or contain that token."
+            exit 1
+          fi
+
+      - name: Checkout workflow repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout private source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: crazylin/codeferry
+          ref: main
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Setup Node.js 22.13.x
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.13.x
+
+      - name: Install locked desktop dependencies
+        working-directory: source/desktop
+        run: |
+          npm ci
+          node node_modules/electron/install.js
+
+      - name: Package desktop client
+        working-directory: source/desktop
+        env:
+          CODEFERRY_PACK_PLATFORM: ${{ matrix.pack_platform }}
+          CODEFERRY_PACK_ARCH: ${{ matrix.pack_arch }}
+        run: npm run package
+
+      - name: Upload desktop package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CodeFerry-${{ matrix.pack_platform }}-${{ matrix.pack_arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/artifacts/
+          if-no-files-found: error
+          overwrite: false
