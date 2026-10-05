@@ -34,16 +34,16 @@ jobs:
           CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: |
           if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
-            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a PAT with contents:read and contents:write on the private repository crazylin/codeferry. This public repository does not create or contain that token, and it does not publish build outputs."
+            echo "::error::MISSING_CODEFERRY_SOURCE_TOKEN"
             exit 1
           fi
 
-      - name: Checkout workflow repository
+      - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Checkout private source
+      - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: crazylin/codeferry
@@ -82,7 +82,7 @@ jobs:
           tar -C source/artifacts -czf "${archive}" .
           test -s "${archive}"
 
-      - name: Upload archive to the private repository
+      - name: Upload archive
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
@@ -105,16 +105,16 @@ jobs:
           CODEFERRY_SOURCE_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: |
           if [ -z "${CODEFERRY_SOURCE_TOKEN}" ]; then
-            echo "::error::Missing Actions secret CODEFERRY_SOURCE_TOKEN. Store a PAT with contents:read and contents:write on the private repository crazylin/codeferry."
+            echo "::error::MISSING_CODEFERRY_SOURCE_TOKEN"
             exit 1
           fi
 
-      - name: Checkout workflow repository
+      - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Checkout private source
+      - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: crazylin/codeferry
@@ -124,7 +124,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Rust 1.96.0
-        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58 # pinned action implementation
+        uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with:
           toolchain: 1.96.0
 
@@ -155,7 +155,7 @@ jobs:
           docker save "codeferry-gateway:${tag}" | gzip -1 > "codeferry-gateway-${tag}.tar.gz"
           test -s "codeferry-gateway-${tag}.tar.gz"
 
-      - name: Upload image to the private repository
+      - name: Upload image
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}

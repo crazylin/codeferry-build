@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Attach one file to a release on the private source repository.
-# The public workflow repository does not store or upload this file.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -13,11 +11,11 @@ file="$2"
 repo="crazylin/codeferry"
 
 if [ -z "${GH_TOKEN:-}" ]; then
-  echo "::error::GH_TOKEN is empty."
+  echo "::error::MISSING_GH_TOKEN"
   exit 1
 fi
 if [ ! -s "${file}" ]; then
-  echo "::error::Build output is missing."
+  echo "::error::MISSING_BUILD_OUTPUT"
   exit 1
 fi
 
@@ -27,11 +25,10 @@ for _ in 1 2 3 4 5 6; do
   fi
   gh release create "${tag}" --repo "${repo}" \
     --title "Build ${tag}" \
-    --notes "Private build output. Download with: gh release download ${tag} --repo ${repo}" \
+    --notes "" \
     && break
   sleep 2
 done
 
 gh release view "${tag}" --repo "${repo}" >/dev/null
 gh release upload "${tag}" "${file}" --repo "${repo}" --clobber=false
-echo "Uploaded $(basename "${file}") to ${repo} release ${tag}."
