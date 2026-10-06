@@ -1,6 +1,6 @@
 import { createReadStream, constants } from 'node:fs';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, stat, writeFile, lstat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, writeFile, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -40,16 +40,31 @@ export async function writeMetadata(file, metadata) {
   const info = await identity(file);
   await writeFile(file + '.metadata.json', JSON.stringify({ ...metadata, ...info }, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); return info;
 }
-async function walk(root, depth = 0) {
-  if (depth > 3) throw Error('ASSET_BUNDLE_INVALID'); const files=[];
-  for (const entry of await readdir(root,{withFileTypes:true})) { const path=join(root,entry.name); if(entry.isDirectory()&&!entry.name.endsWith('.app')) files.push(...await walk(path,depth+1)); else if(entry.isFile()) files.push(path); }
+async function installerFiles(bundle, platform) {
+  const directories = { darwin: ['dmg', 'macos'], win32: ['nsis'], linux: ['appimage', 'deb'] }[platform];
+  const root = await lstat(bundle);
+  if (!root.isDirectory() || root.isSymbolicLink()) throw Error('ASSET_BUNDLE_INVALID');
+  const files = [];
+  for (const directory of directories) {
+    const path = join(bundle, directory), info = await lstat(path);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw Error('ASSET_BUNDLE_INVALID');
+    const entries = await readdir(path, { withFileTypes: true });
+    if (entries.length > 256) throw Error('ASSET_BUNDLE_INVALID');
+    // Tauri leaves AppDir and Debian staging trees beside finished installers.
+    // Installer discovery is limited to the documented bundle directory itself.
+    for (const entry of entries) {
+      if (!/\.(?:dmg|app\.tar\.gz|exe|AppImage|deb)$/.test(entry.name)) continue;
+      if (!entry.isFile() || entry.isSymbolicLink()) throw Error('ASSET_BUNDLE_INVALID');
+      files.push(join(path, entry.name));
+    }
+  }
   return files;
 }
 export async function collectTauri(source, platform = process.platform, arch = process.arch, destination = process.env.ASSET_DIR, sourceCommit = process.env.SOURCE_SHA) {
   const root=resolve(source), pkg=JSON.parse(await readFile(join(root,'desktop-tauri/package.json'),'utf8'));
   if(!VERSION.test(pkg.version) || !targetFor(platform,arch) || !destination) throw Error('ASSET_ARGUMENT_INVALID');
   if(platform==='darwin') await verifyMacBundle(root, join(root,'desktop-tauri/src-tauri/target/release/bundle/macos/CodeFerry.app'),pkg.version);
-  const files=await walk(join(root,'desktop-tauri/src-tauri/target/release/bundle'));
+  const files=await installerFiles(join(root,'desktop-tauri/src-tauri/target/release/bundle'),platform);
   const formats=platform==='darwin'?['dmg','tar.gz']:platform==='win32'?['exe']:['AppImage','deb'];
   const pub=await readFile(join(root,'desktop-tauri/updater.pub'),'utf8');
   await mkdir(destination,{recursive:true,mode:0o700});
@@ -57,7 +72,7 @@ export async function collectTauri(source, platform = process.platform, arch = p
     const suffix=format==='tar.gz'?'.app.tar.gz':'.'+format;
     const candidates=files.filter(file=>file.endsWith(suffix)); if(candidates.length!==1) throw Error('ASSET_BUNDLE_SET_INVALID');
     const file=candidates[0], updater=['tar.gz','exe','AppImage'].includes(format);
-    let signature; if(updater) { const info=await stat(file+'.sig'); if(info.size>4096) throw Error('ASSET_SIGNATURE_INVALID'); signature=(await readFile(file+'.sig','utf8')).trim(); await verifyTauriSignature(file,signature,pub,pkg.version); }
+    let signature; if(updater) { const info=await lstat(file+'.sig'); if(!info.isFile()||info.isSymbolicLink()||info.size<1||info.size>4096) throw Error('ASSET_SIGNATURE_INVALID'); signature=(await readFile(file+'.sig','utf8')).trim(); await verifyTauriSignature(file,signature,pub,pkg.version); }
     const name=artifactName(pkg.version,platform,arch,format), output=join(destination,name);
     await copyFile(file,output,constants.COPYFILE_EXCL);
     const metadata=expectedMetadata('desktop',pkg.version,platform,arch,'full',name,sourceCommit,format,signature);

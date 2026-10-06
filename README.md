@@ -2,6 +2,8 @@
 
 This repository contains the public workflow only. Source and release assets stay in the private `crazylin/codeferry` repository. A build resolves one exact private source commit and never switches revisions between tests or platforms. Detailed source build logs stay in private runner files; the existing cleanup workflow removes public run logs afterward.
 
+Failed tasks expose only their exit code, signal and bounded compiler error codes. They do not expose raw source diagnostics, paths or environment values. Successful runs may clear public logs; failed run status and these safe diagnostics remain visible.
+
 Required repository secrets are `CODEFERRY_SOURCE_TOKEN` for private source/assets, `TAURI_SIGNING_PRIVATE_KEY` (and optional `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) for official bundle signing, and `CODEFERRY_PUBLISH_KEY` for the final server publication job. Do not put secrets in source, workflow inputs, command arguments or checked-in files. Only the final publication job receives the server key.
 
 Manual inputs:
