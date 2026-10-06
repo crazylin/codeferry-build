@@ -117,7 +117,8 @@ test('a restored partial state is promoted by a successful full job rather than 
 }));
 test('native cache key survives desktop version bumps and CI debug flags are bound exactly', async () => fixture(async root => {
   await inputs(root);
-  const identity = { source: root, bucket: 'desktop-darwin-arm64', platform: 'darwin', arch: 'arm64', rustc: 'rustc 1.96.0\nhost: aarch64-apple-darwin' };
+  const identity = { source: root, bucket: 'desktop-darwin-arm64', platform: 'darwin', arch: 'arm64', rustc: 'rustc 1.96.0\nhost: aarch64-apple-darwin',
+    compileFlags: { CARGO_PROFILE_DEV_DEBUG: '', CARGO_PROFILE_TEST_DEBUG: '', CARGO_INCREMENTAL: '' } };
   const native = await cacheKey({ ...identity, part: 'native-release' });
   const desktop = await cacheKey({ ...identity, part: 'desktop-debug' });
   const gateway = await cacheKey({ ...identity, bucket, platform: 'linux', arch: 'x64', part: 'gateway-release' });
@@ -189,7 +190,7 @@ test('two independent Cargo builds reuse a cached compiled dependency as Fresh',
     await rm(join(source, 'gateway-rs/Cargo.lock')); // Cargo generates a real path-only lock without network access.
     await writeFile(join(source, 'gateway-rs/src/main.rs'), 'fn main() { println!("{}",cache_dependency::value()); }\n');
   }
-  const build = source => execFileSync('cargo', ['check', '--offline', '--manifest-path', join(source, 'gateway-rs/Cargo.toml'), '-v'],
+  const build = source => execFileSync('cargo', ['check', '--color', 'never', '--offline', '--manifest-path', join(source, 'gateway-rs/Cargo.toml'), '-v'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
   build(first);
   const transport = fakeTransport(), debugPart = 'gateway-debug', debugBucket = 'validate-linux-x64';
@@ -198,7 +199,7 @@ test('two independent Cargo builds reuse a cached compiled dependency as Fresh',
   await cp(join(first, 'gateway-rs/Cargo.lock'), join(second, 'gateway-rs/Cargo.lock'));
   // stdout is empty for Cargo check; capture bounded stderr without printing source/debug paths.
   const { spawnSync } = await import('node:child_process');
-  const result = spawnSync('cargo', ['check', '--locked', '--offline', '--manifest-path', join(second, 'gateway-rs/Cargo.toml'), '-v'],
+  const result = spawnSync('cargo', ['check', '--color', 'never', '--locked', '--offline', '--manifest-path', join(second, 'gateway-rs/Cargo.toml'), '-v'],
     { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 ** 2 });
   assert.equal(result.status, 0); assert.match(result.stderr, /Fresh cache_dependency v0\.1\.0/);
 }));
@@ -219,11 +220,11 @@ test('real Cargo version bump reuses cached dependency and recompiles the applic
   const desktopBucket = `desktop-${process.platform}-${process.arch}`, desktopPart = 'desktop-debug';
   const identity = { bucket: desktopBucket, part: desktopPart, rustc: 'rustc 1.96.0\nhost: fixture' };
   const firstKey = await cacheKey({ ...identity, source: first }); assert.equal(await cacheKey({ ...identity, source: second }), firstKey);
-  execFileSync('cargo', ['check', '--locked', '--offline', '--manifest-path', join(first, 'desktop-tauri/src-tauri/Cargo.toml'), '-v'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+  execFileSync('cargo', ['check', '--color', 'never', '--locked', '--offline', '--manifest-path', join(first, 'desktop-tauri/src-tauri/Cargo.toml'), '-v'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
   const transport = fakeTransport(); await savePart({ source: first, temporary, bucket: desktopBucket, key: firstKey, part: desktopPart, sourceSha, transport });
   assert.equal(await restorePart({ source: second, temporary, bucket: desktopBucket, key: firstKey, part: desktopPart, transport }), 'partial');
   const { spawnSync } = await import('node:child_process');
-  const result = spawnSync('cargo', ['check', '--locked', '--offline', '--manifest-path', join(second, 'desktop-tauri/src-tauri/Cargo.toml'), '-v'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 ** 2 });
+  const result = spawnSync('cargo', ['check', '--color', 'never', '--locked', '--offline', '--manifest-path', join(second, 'desktop-tauri/src-tauri/Cargo.toml'), '-v'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 ** 2 });
   assert.equal(result.status, 0); assert.match(result.stderr, /Fresh cache_dependency v0\.1\.0/);
   assert.match(result.stderr, /Checking codeferry-desktop v0\.2\.2/); assert.match(result.stderr, /Running .*--crate-name codeferry_desktop/);
 }));
