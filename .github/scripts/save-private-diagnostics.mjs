@@ -108,13 +108,27 @@ async function main() {
     await writeFile(file, raw, { flag: 'wx', mode: 0o600 });
     // A separate private draft cannot enter the immutable release artifact set.
     // Creation is attempted once; unknown results are never replayed.
-    execFileSync('gh', ['release', 'create', `diagnostics-${run}-${attempt}-${role}`, file,
-      '--repo', 'crazylin/codeferry', '--draft', '--target', source,
-      '--title', `Private build diagnostics ${run} ${role}`, '--notes', 'Bounded pre-signing diagnostics; not a release artifact.'],
-      { stdio: 'ignore', timeout: 120_000 });
+    let privateRepository;
+    try {
+      privateRepository = execFileSync('gh', ['api', 'repos/crazylin/codeferry', '--jq', '.private'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60_000, maxBuffer: 1024 }).trim();
+    } catch { throw Error('PRIVATE_DIAGNOSTIC_REPOSITORY_UNAVAILABLE'); }
+    if (privateRepository !== 'true') throw Error('PRIVATE_DIAGNOSTIC_PRIVATE_REPOSITORY_REQUIRED');
+    try {
+      execFileSync('gh', ['release', 'create', `diagnostics-${run}-${attempt}-${role}`, file,
+        '--repo', 'crazylin/codeferry', '--draft', '--target', source,
+        '--title', `Private build diagnostics ${run} ${role}`, '--notes', 'Bounded pre-signing diagnostics; not a release artifact.'],
+        { stdio: 'ignore', timeout: 120_000 });
+    } catch { throw Error('PRIVATE_DIAGNOSTIC_UPLOAD_UNAVAILABLE'); }
     console.log('PRIVATE_BUILD_DIAGNOSTICS_SAVED');
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch(() => { console.error('PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE'); process.exitCode = 0; });
+  main().catch(error => {
+    const reason = /^(?:PRIVATE_DIAGNOSTIC_[A-Z_]{1,64}|EACCES|EPERM|EINVAL|ENOTSUP|ENOENT|EIO)$/.test(error.message ?? '')
+      ? error.message : /^(EACCES|EPERM|EINVAL|ENOTSUP|ENOENT|EIO)$/.test(error.code ?? '') ? error.code : 'UNCLASSIFIED';
+    console.error('PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE');
+    console.error('PRIVATE_BUILD_DIAGNOSTICS_REASON_' + reason);
+    process.exitCode = 0;
+  });
 }

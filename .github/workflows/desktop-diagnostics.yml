@@ -75,8 +75,10 @@ jobs:
         working-directory: source/desktop-tauri
         run: node ../../.github/scripts/ci-task.mjs tauri-dependencies npm ci
       - name: Build frontend and compile complete Rust client tests
+        shell: bash
         working-directory: source/desktop-tauri
         run: |
+          set -euo pipefail
           node ../../.github/scripts/ci-task.mjs tauri-types npm run typecheck
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run

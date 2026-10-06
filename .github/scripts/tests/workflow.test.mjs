@@ -38,6 +38,8 @@ test('each fresh package checkout builds embedded frontend assets before Tauri C
   assert.notEqual(build, -1);
   assert.notEqual(nativeTest, -1);
   assert.ok(install < build && build < nativeTest);
+  assert.match(packageJob, /Typecheck build frontend and test complete Rust client\n        shell: bash/);
+  assert.match(packageJob, /set -euo pipefail\n          node .*tauri-types/);
 });
 test('validation builds the Tauri frontend without retired Electron runtime contracts', () => {
   const validation = job('validate');

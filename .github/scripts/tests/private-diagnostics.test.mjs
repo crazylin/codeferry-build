@@ -96,7 +96,7 @@ test('invalid configuration is best effort and does not create files or invoke p
       const result = spawnSync(process.execPath, [collector], { encoding: 'utf8', env: { ...valid, ...invalid } });
       assert.equal(result.status, 0);
       assert.equal(result.stdout, '');
-      assert.equal(result.stderr, 'PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE\n');
+      assert.equal(result.stderr, 'PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE\nPRIVATE_BUILD_DIAGNOSTICS_REASON_PRIVATE_DIAGNOSTIC_CONFIGURATION_INVALID\n');
       assert.deepEqual(await readdir(directory), ['private-codeferry-logs']);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -110,7 +110,7 @@ test('oversized serialized diagnostics are rejected and temporary output is remo
     const result = spawnSync(process.execPath, [collector], { encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: directory, CODEFERRY_DIAGNOSTIC_ROLE: 'linux-x64', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', SOURCE_SHA: 'a'.repeat(40), GH_TOKEN: 'synthetic-private-token' } });
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '');
-    assert.equal(result.stderr, 'PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE\n');
+    assert.equal(result.stderr, 'PRIVATE_BUILD_DIAGNOSTICS_UNAVAILABLE\nPRIVATE_BUILD_DIAGNOSTICS_REASON_PRIVATE_DIAGNOSTIC_TOO_LARGE\n');
     assert.deepEqual(await readdir(directory), ['private-codeferry-logs']);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

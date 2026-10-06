@@ -30,7 +30,10 @@ try {
       const position = Math.max(startedAt, size - 256 * 1024);
       const bytes = Buffer.alloc(Math.max(0, size - position));
       const read = await input.read(bytes, 0, bytes.length, position);
-      const raw = bytes.subarray(0, read.bytesRead).toString('utf8');
+      // Cargo forces ANSI colors in Actions; strip its bounded control sequences
+      // before finding fixed diagnostic codes, without printing the source text.
+      const raw = bytes.subarray(0, read.bytesRead).toString('utf8')
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
       codes = [...new Set([
         ...[...raw.matchAll(/\berror\s+(TS\d{4,5})\b/g)].map(match => match[1]),
         ...[...raw.matchAll(/\berror\[(E\d{4})\]/g)].map(match => match[1]),

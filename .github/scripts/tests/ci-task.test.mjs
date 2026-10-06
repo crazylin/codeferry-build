@@ -118,3 +118,13 @@ test('a successful native fixture or unbounded separated JSON markers do not bec
     assert.equal(result.stderr, 'CI_TASK_FAILED_FIXTURE_CONTRACTS\nCI_TASK_DIAGNOSTICS exit_code=1 signal=none compiler_codes=none\n');
   });
 });
+
+test('colored Cargo diagnostics retain compiler codes without copying source', async () => {
+  const diagnostics = '\x1b[1m\x1b[91merror[E0599]\x1b[0m\x1b[1m: PRIVATE_SOURCE_TEXT\x1b[0m\n' +
+    '\x1b[1m\x1b[91merror:\x1b[0m failed to run custom build command for PRIVATE_PACKAGE';
+  await run(`console.error(${JSON.stringify(diagnostics)});process.exit(101);`, async result => {
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, 'CI_TASK_FAILED_FIXTURE_CONTRACTS\nCI_TASK_DIAGNOSTICS exit_code=101 signal=none compiler_codes=E0599\nCI_TASK_FAILURE_KINDS custom_build_failed\n');
+    assert.ok(!result.stderr.includes('PRIVATE'));
+  });
+});
