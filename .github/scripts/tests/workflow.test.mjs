@@ -29,6 +29,14 @@ test('native source preparation precedes Cargo and source authoritative Runner s
   assert.match(job('package'), /node scripts\/native-build\.mjs/);
   assert.doesNotMatch(text, /stage-desktop-runtime|--bin webcodex-runner/);
 });
+test('validation builds the Tauri frontend without retired Electron runtime contracts', () => {
+  const validation = job('validate');
+  assert.match(validation, /working-directory: source\/desktop-tauri/);
+  assert.match(validation, /tauri-frontend-dependencies npm ci/);
+  assert.match(validation, /tauri-frontend-types npm run typecheck/);
+  assert.match(validation, /tauri-frontend-build npm run build/);
+  assert.doesNotMatch(validation, /working-directory: source\/desktop\n|ELECTRON_SKIP_BINARY_DOWNLOAD|desktop-contracts/);
+});
 test('all builds and actual database/native tests precede publisher key access', () => {
   assert.match(job('validate'), /TEST_DATABASE_URL/); assert.match(job('validate'), /TEST_REDIS_URL/);
   assert.match(job('validate'), /--include-ignored/); assert.match(job('validate'), /release_worker_test\.py/);

@@ -118,13 +118,14 @@ jobs:
       - name: Test TypeScript contracts
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs root-contracts npm test
-      - name: Install locked desktop dependencies
-        working-directory: source/desktop
-        env: {ELECTRON_SKIP_BINARY_DOWNLOAD: '1'}
-        run: node ../../.github/scripts/ci-task.mjs desktop-dependencies npm ci
-      - name: Test desktop TypeScript contracts
-        working-directory: source/desktop
-        run: node ../../.github/scripts/ci-task.mjs desktop-contracts npm test
+      - name: Install locked Tauri frontend dependencies
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-frontend-dependencies npm ci
+      - name: Check and bundle the current Tauri frontend
+        working-directory: source/desktop-tauri
+        run: |
+          node ../../.github/scripts/ci-task.mjs tauri-frontend-types npm run typecheck
+          node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
       - name: Reproduce reviewed native patch before any Cargo build
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
       - name: Validate native formatting and authorization
