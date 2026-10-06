@@ -24,6 +24,7 @@ try {
     // bounded tail of this invocation and expose allowlisted compiler codes.
     const input = await open(path, 'r');
     let codes = [];
+    let failureKinds = [];
     try {
       const size = (await input.stat()).size;
       const position = Math.max(startedAt, size - 256 * 1024);
@@ -34,10 +35,31 @@ try {
         ...[...raw.matchAll(/\berror\s+(TS\d{4,5})\b/g)].map(match => match[1]),
         ...[...raw.matchAll(/\berror\[(E\d{4})\]/g)].map(match => match[1]),
       ])].sort().slice(0, 32);
+      // Rust custom builds, killed compiler children and test assertions often
+      // fail without an E-code. These fixed labels disclose no source, paths,
+      // dependency names, test names or text captured from the private log.
+      failureKinds = [
+        ['compiler_sigkill', /\(signal:\s*9,\s*SIGKILL(?::\s*kill)?\)/],
+        ['compiler_out_of_memory', /(?:memory allocation of \d+ bytes failed|fatal runtime error: out of memory)/],
+        ['custom_build_failed', /error:\s*failed to run custom build command for/],
+        ['proc_macro_panicked', /error:\s*proc macro panicked/],
+        ['tests_failed', /test result: FAILED\./],
+        ['linker_failed', /error:\s*linking with [^\r\n]+ failed:\s*exit status:/],
+        ['missing_linker', /error:\s*linker `[^\r\n]+` not found/],
+        ['missing_c_compiler', /failed to find tool [^\r\n]+(?:No such file or directory|not found)/],
+        ['pkg_config_failed', /pkg-config exited with status code/],
+        ['missing_system_library', /The system library [^\r\n]+ required by crate [^\r\n]+ was not found/],
+        ['missing_frontend_dist', /The `frontendDist` configuration is set to [^\r\n]+ but this path doesn't exist/],
+        ['dependency_resolution_failed', /(?:failed to select a version for|no matching package named [^\r\n]+ found)/],
+        ['disk_full', /(?:No space left on device|os error 28\b)/],
+        ['python_subprocess_timeout', /\b(?:subprocess\.)?TimeoutExpired\b/],
+        ['native_browser_fixture_failed', /"passed"\s*:\s*false\s*,[\s\S]{0,16384}?"problems"\s*:\s*\[/],
+      ].filter(([, pattern]) => pattern.test(raw)).map(([kind]) => kind).sort();
     } finally { await input.close(); }
     const code = Number.isInteger(result.code) && result.code >= 0 && result.code <= 255 ? result.code : 'none';
     const signal = /^SIG[A-Z0-9]{1,16}$/.test(result.signal ?? '') ? result.signal : 'none';
     console.error(`CI_TASK_DIAGNOSTICS exit_code=${code} signal=${signal} compiler_codes=${codes.join(',') || 'none'}`);
+    if (failureKinds.length) console.error('CI_TASK_FAILURE_KINDS ' + failureKinds.join(','));
     process.exitCode = 1;
   }
   else console.log('CI_TASK_PASSED_' + task.toUpperCase().replaceAll('-', '_'));

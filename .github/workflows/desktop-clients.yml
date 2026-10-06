@@ -29,6 +29,9 @@ concurrency:
 
 env:
   CARGO_BUILD_JOBS: '2'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   resolve:
@@ -107,7 +110,12 @@ jobs:
           path: source
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: '22.13.1'}
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
       - name: Validate workflow publishing contracts
@@ -128,6 +136,11 @@ jobs:
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
       - name: Reproduce reviewed native patch before any Cargo build
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Restore private validation Rust dependencies
+        continue-on-error: true
+        timeout-minutes: 30
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore validate-linux-x64
       - name: Validate native formatting and authorization
         working-directory: source/upstream/webcodex
         run: |
@@ -141,6 +154,20 @@ jobs:
       - name: Test host update worker migration and identity contracts
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs gateway-worker python3 -m unittest discover -s scripts/test -p release_worker_test.py
+      - name: Preserve failed validation diagnostics privately
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_DIAGNOSTIC_ROLE: validate
+        run: node .github/scripts/save-private-diagnostics.mjs
+      - name: Save available validation Rust dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save validate-linux-x64
 
   prepare-release:
     name: Create one private immutable build draft
@@ -189,7 +216,12 @@ jobs:
           path: source
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: '22.13.1'}
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
       - name: Install locked workspace dependencies
@@ -197,6 +229,11 @@ jobs:
         run: node ../.github/scripts/ci-task.mjs workspace-dependencies npm ci
       - name: Prepare reviewed native source
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Restore private desktop Rust dependencies
+        continue-on-error: true
+        timeout-minutes: 40
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore desktop-${{ matrix.platform }}-${{ matrix.arch }}
       - name: Build and verify host Runner using authoritative source script
         env: {CODEFERRY_NATIVE_PROFILE: 'release'}
         working-directory: source
@@ -243,6 +280,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: bash .github/scripts/publish-private-asset.sh "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$ASSET_DIR"
+      - name: Preserve failed desktop diagnostics privately
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_DIAGNOSTIC_ROLE: ${{ matrix.platform }}-${{ matrix.arch }}
+        run: node .github/scripts/save-private-diagnostics.mjs
+      - name: Save available desktop Rust dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 40
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save desktop-${{ matrix.platform }}-${{ matrix.arch }}
 
   gateway:
     name: Embedded gateway Docker image linux amd64
@@ -283,11 +334,21 @@ jobs:
           path: source
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: '22.13.1'}
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
       - name: Prepare native dependency before building gateway
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Restore private gateway Rust dependencies
+        continue-on-error: true
+        timeout-minutes: 20
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore gateway-linux-x64
       - name: Build embedded gateway from the immutable source
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs gateway-build cargo build --manifest-path gateway-rs/Cargo.toml --release --locked
@@ -312,6 +373,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: bash .github/scripts/publish-private-asset.sh "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$ASSET_DIR"
+      - name: Preserve failed gateway diagnostics privately
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_DIAGNOSTIC_ROLE: gateway-linux-x64
+        run: node .github/scripts/save-private-diagnostics.mjs
+      - name: Save available gateway Rust dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save gateway-linux-x64
 
   publish:
     name: Publish verified release set and update gateway
@@ -339,7 +414,12 @@ jobs:
           path: source
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: '22.13.1'}
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
       - name: Download private assets after every matrix build passes
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
