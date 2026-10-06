@@ -207,12 +207,13 @@ jobs:
       - name: Install locked React and Tauri dependencies
         working-directory: source/desktop-tauri
         run: node ../../.github/scripts/ci-task.mjs tauri-dependencies npm ci
-      - name: Typecheck and test complete Rust client
+      - name: Typecheck build frontend and test complete Rust client
         working-directory: source/desktop-tauri
         env:
           CODEFERRY_TEST_RUNNER: ${{ github.workspace }}/source/runtime/${{ matrix.runner }}
         run: |
           node ../../.github/scripts/ci-task.mjs tauri-types npm run typecheck
+          node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked -- --include-ignored
       - name: Verify Unix provider cleanup with the actual Runner
         if: runner.os != 'Windows'

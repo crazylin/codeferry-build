@@ -29,6 +29,16 @@ test('native source preparation precedes Cargo and source authoritative Runner s
   assert.match(job('package'), /node scripts\/native-build\.mjs/);
   assert.doesNotMatch(text, /stage-desktop-runtime|--bin webcodex-runner/);
 });
+test('each fresh package checkout builds embedded frontend assets before Tauri Cargo tests', () => {
+  const packageJob = job('package');
+  const install = packageJob.indexOf('tauri-dependencies npm ci');
+  const build = packageJob.indexOf('tauri-frontend-build npm run build');
+  const nativeTest = packageJob.indexOf('tauri-contracts cargo test');
+  assert.notEqual(install, -1);
+  assert.notEqual(build, -1);
+  assert.notEqual(nativeTest, -1);
+  assert.ok(install < build && build < nativeTest);
+});
 test('validation builds the Tauri frontend without retired Electron runtime contracts', () => {
   const validation = job('validate');
   assert.match(validation, /working-directory: source\/desktop-tauri/);
