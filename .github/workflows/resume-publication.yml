@@ -14,8 +14,9 @@ jobs:
     timeout-minutes: 90
     env:
       SOURCE_SHA: 5cbb746b024cbc12e81333fcc74c82cd596bc02d
-      ASSET_DIR: ${{ runner.temp }}/verified-release-assets
     steps:
+      - name: Configure private artifact directory
+        run: echo "ASSET_DIR=$RUNNER_TEMP/verified-release-assets" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
