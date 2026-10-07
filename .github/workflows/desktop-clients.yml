@@ -123,19 +123,19 @@ jobs:
       - name: Install locked source dependencies
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs root-dependencies npm ci
-      - name: Test TypeScript contracts
-        working-directory: source
-        run: node ../.github/scripts/ci-task.mjs root-contracts npm test
       - name: Install locked Tauri frontend dependencies
         working-directory: source/desktop-tauri
         run: node ../../.github/scripts/ci-task.mjs tauri-frontend-dependencies npm ci
+      - name: Reproduce reviewed native patch before any Cargo build
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Test TypeScript contracts
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-contracts npm test
       - name: Check and bundle the current Tauri frontend
         working-directory: source/desktop-tauri
         run: |
           node ../../.github/scripts/ci-task.mjs tauri-frontend-types npm run typecheck
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
-      - name: Reproduce reviewed native patch before any Cargo build
-        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
       - name: Restore private validation Rust dependencies
         continue-on-error: true
         timeout-minutes: 30

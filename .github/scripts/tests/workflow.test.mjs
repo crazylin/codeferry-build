@@ -116,3 +116,15 @@ with tempfile.TemporaryDirectory() as temp:
  else:raise AssertionError('symlink accepted')
 `], { stdio: 'pipe' });
 });
+
+
+test('fresh contract tests have Tauri dependencies and reproduced native source before running', () => {
+  const validation = job('validate');
+  const root = validation.indexOf('root-dependencies npm ci');
+  const frontend = validation.indexOf('tauri-frontend-dependencies npm ci');
+  const native = validation.indexOf('native-source node .github/scripts/prepare-source.mjs');
+  const contracts = validation.indexOf('root-contracts npm test');
+  assert.ok([root, frontend, native, contracts].every(index => index >= 0));
+  assert.ok(root < contracts && frontend < contracts && native < contracts);
+  assert.match(validation, /native-auth cargo test --locked -p webcodex --lib auth::/);
+});
