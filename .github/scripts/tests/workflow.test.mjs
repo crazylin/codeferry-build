@@ -128,3 +128,15 @@ test('fresh contract tests have Tauri dependencies and reproduced native source 
   assert.ok(root < contracts && frontend < contracts && native < contracts);
   assert.match(validation, /native-auth cargo test --locked -p webcodex --lib auth::/);
 });
+
+
+test('Arena release validates scoring and UI and distributes fingerprint attribution', async () => {
+ assert.match(job('validate'), /fingerprint-contracts cargo test --locked --manifest-path crates\/codeferry-fingerprint\/Cargo.toml/);
+ assert.match(job('validate'), /tauri-ui npm run test:ui/);
+ assert.match(job('validate'), /--include-ignored --test-threads=1/);
+ const image=await readFile(join(repo,'.github/scripts/gateway-image.mjs'),'utf8');
+ assert.ok(image.includes('licenses/lm-detector/LICENSE'));
+ assert.ok(image.includes('LIBRARY_MANIFEST.json'));
+ const smoke=await readFile(join(repo,'.github/scripts/gateway-smoke.mjs'),'utf8');
+ assert.ok(smoke.includes('await verifyFingerprintDistribution'));
+});

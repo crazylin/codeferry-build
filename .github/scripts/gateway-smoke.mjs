@@ -1,3 +1,4 @@
+import { verifyFingerprintDistribution } from './fingerprint-smoke.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -28,6 +29,7 @@ try {
   if (!native.ok) throw Error('GATEWAY_IMAGE_NATIVE_NOT_READY');
   const website = await fetch('http://127.0.0.1:18790/', { signal: AbortSignal.timeout(5000) });
   if (!website.ok || !(await website.text()).includes('CodeFerry')) throw Error('GATEWAY_IMAGE_WEBSITE_NOT_READY');
+  await verifyFingerprintDistribution('http://127.0.0.1:18790', join('source','fingerprints','lm-detector-d53d3f5-v1','manifest.json'));
   execFileSync('docker', ['stop', '--time', '330', name], { stdio: 'pipe', timeout: 335_000 });
   const state = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8' }))[0].State;
   if (state.Running || state.ExitCode !== 0) throw Error('GATEWAY_IMAGE_DRAIN_FAILED');

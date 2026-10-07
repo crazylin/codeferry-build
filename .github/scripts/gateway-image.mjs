@@ -76,6 +76,10 @@ export async function stageGatewayImage({ sourceRoot = resolve('source'), tempor
   await copyFile(join(source, 'gateway-rs/LICENSE'), join(runtime, 'LICENSE'));
   await copyFile(join(source, 'upstream/webcodex/LICENSE'), join(runtime, 'WEBCODEX_LICENSE'));
   await copyFile(join(source, 'desktop/NOTICE.md'), join(runtime, 'CODEFERRY-NOTICE.md'));
+  const fingerprintLegal = join(runtime, 'licenses', 'lm-detector');
+  await mkdir(fingerprintLegal, { recursive: true });
+  await copyFile(join(source, 'licenses/lm-detector/LICENSE'), join(fingerprintLegal, 'LICENSE'));
+  await copyFile(join(source, 'fingerprints/lm-detector-d53d3f5-v1/manifest.json'), join(fingerprintLegal, 'LIBRARY_MANIFEST.json'));
   await copyFile(join(source, 'deploy/1panel/Dockerfile'), join(context, 'Dockerfile'));
   const cert = process.platform === 'darwin' ? '/etc/ssl/cert.pem' : '/etc/ssl/certs/ca-certificates.crt';
   await copyFile(cert, join(context, 'ca-certificates.crt'));
@@ -103,7 +107,7 @@ export async function stageGatewayImage({ sourceRoot = resolve('source'), tempor
       source: pkg.source ? `https://crates.io/crates/${pkg.name}/${pkg.version}` : 'CodeFerry reviewed native source', noticeDirectory: 'licenses/' + directory.split(/[\\/]/).pop() });
   }
   await writeFile(join(runtime, 'dependencies.json'), JSON.stringify({ packages: inventory }, null, 2) + '\n', { flag: 'wx' });
-  await writeFile(join(runtime, 'THIRD_PARTY_NOTICES.md'), '# CodeFerry embedded Rust gateway\n\nWebCodex retains Apache-2.0 attribution and its upstream license. Exact locked normal/build dependencies and local license texts are in dependencies.json and licenses/. Reviewed upstream notices include immutable source provenance and hashes. The image also retains Debian distribution notices. No separate native Server executable is bundled.\n', { flag: 'wx' });
+  await writeFile(join(runtime, 'THIRD_PARTY_NOTICES.md'), '# CodeFerry embedded Rust gateway\n\nWebCodex retains Apache-2.0 attribution and its upstream license. Exact locked normal/build dependencies and local license texts are in dependencies.json and licenses/. Reviewed upstream notices include immutable source provenance and hashes. The image also retains Debian distribution notices. No separate native Server executable is bundled. Embedded lm-detector fingerprint data retains MIT attribution and its exact manifest in licenses/lm-detector/.\n', { flag: 'wx' });
   const tag = `codeferry-gateway:${version}-${sourceSha.slice(0,12)}`;
   const info = { product: 'CodeFerry', version, sourceSha, migrationsSha256: migrationHash, tag,
     platform: 'linux/amd64', binarySha256: binary.sha256, binarySize: binary.size, dependencyPackages: inventory.length };

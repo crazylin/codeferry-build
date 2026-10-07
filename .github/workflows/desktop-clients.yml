@@ -136,11 +136,15 @@ jobs:
         run: |
           node ../../.github/scripts/ci-task.mjs tauri-frontend-types npm run typecheck
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
+          node ../../.github/scripts/ci-task.mjs tauri-ui npm run test:ui
       - name: Restore private validation Rust dependencies
         continue-on-error: true
         timeout-minutes: 30
         env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
         run: node .github/scripts/private-cache.mjs restore validate-linux-x64
+      - name: Validate local fingerprint scoring parity
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs fingerprint-contracts cargo test --locked --manifest-path crates/codeferry-fingerprint/Cargo.toml
       - name: Validate native formatting and authorization
         working-directory: source/upstream/webcodex
         run: |
@@ -150,7 +154,7 @@ jobs:
           node ../../../.github/scripts/ci-task.mjs native-drain cargo test --locked -p webcodex --lib server_shutdown
       - name: Test gateway with real isolated PostgreSQL and Redis
         working-directory: source
-        run: node ../.github/scripts/ci-task.mjs gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --include-ignored
+        run: node ../.github/scripts/ci-task.mjs gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --include-ignored --test-threads=1
       - name: Test host update worker migration and identity contracts
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs gateway-worker python3 -m unittest discover -s scripts/test -p release_worker_test.py
