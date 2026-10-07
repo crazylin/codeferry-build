@@ -1,7 +1,8 @@
 /** Retain bounded pre-signing diagnostics only in the private source repository. */
 import { execFileSync } from 'node:child_process';
 import { constants } from 'node:fs';
-import { open, lstat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { diagnosticLstat as lstat } from './diagnostic-file-identity.mjs';
+import { open, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,18 +72,19 @@ export async function collectDiagnostics(directory, environment = process.env) {
     let before;
     try { before = await lstat(path); }
     catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw Error('PRIVATE_DIAGNOSTIC_FILE_INVALID');
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw Error('PRIVATE_DIAGNOSTIC_FILE_INVALID');
     const input = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
-      const info = await input.stat();
-      if (!info.isFile() || info.nlink !== 1 || !sameFile(before, info) || !Number.isSafeInteger(info.size) || info.size < 0) throw Error('PRIVATE_DIAGNOSTIC_FILE_INVALID');
-      const bytes = Buffer.alloc(Math.min(info.size, MAX_TAIL + MAX_SECRET));
-      const position = info.size - bytes.length;
+      const info = await input.stat({ bigint: true });
+      const size = Number(info.size);
+      if (!info.isFile() || info.nlink !== 1n || !sameFile(before, info) || !Number.isSafeInteger(size) || size < 0) throw Error('PRIVATE_DIAGNOSTIC_FILE_INVALID');
+      const bytes = Buffer.alloc(Math.min(size, MAX_TAIL + MAX_SECRET));
+      const position = size - bytes.length;
       const read = await input.read(bytes, 0, bytes.length, position);
       if (read.bytesRead !== bytes.length || !sameFile(info, await lstat(path))) throw Error('PRIVATE_DIAGNOSTIC_FILE_CHANGED');
       const raw = bytes.toString('utf8');
-      const boundary = bytes.subarray(0, Math.max(0, info.size - MAX_TAIL - position)).toString('utf8').length;
-      records.push({ task, truncated: info.size > MAX_TAIL, tail: safeTail(raw, boundary, environment) });
+      const boundary = bytes.subarray(0, Math.max(0, size - MAX_TAIL - position)).toString('utf8').length;
+      records.push({ task, truncated: size > MAX_TAIL, tail: safeTail(raw, boundary, environment) });
     } finally { await input.close(); }
   }
   const after = await lstat(directory);

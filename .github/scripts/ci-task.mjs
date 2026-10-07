@@ -1,5 +1,6 @@
 /** Keep private source diagnostics in ephemeral runner files, never public logs. */
 import { spawn } from 'node:child_process';
+import { diagnosticExitCode } from './task-exit-code.mjs';
 import { open, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 const [task, ...command] = process.argv.slice(2);
@@ -59,7 +60,7 @@ try {
         ['native_browser_fixture_failed', /"passed"\s*:\s*false\s*,[\s\S]{0,16384}?"problems"\s*:\s*\[/],
       ].filter(([, pattern]) => pattern.test(raw)).map(([kind]) => kind).sort();
     } finally { await input.close(); }
-    const code = Number.isInteger(result.code) && result.code >= 0 && result.code <= 255 ? result.code : 'none';
+    const code = diagnosticExitCode(result.code);
     const signal = /^SIG[A-Z0-9]{1,16}$/.test(result.signal ?? '') ? result.signal : 'none';
     console.error(`CI_TASK_DIAGNOSTICS exit_code=${code} signal=${signal} compiler_codes=${codes.join(',') || 'none'}`);
     if (failureKinds.length) console.error('CI_TASK_FAILURE_KINDS ' + failureKinds.join(','));

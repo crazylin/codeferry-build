@@ -8,6 +8,13 @@ on:
         required: true
         type: string
 
+      platform:
+        description: Platform to diagnose without publishing
+        required: true
+        default: all
+        type: choice
+        options: [all, win32]
+
 permissions:
   contents: read
 concurrency:
@@ -27,10 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: macos-15, platform: darwin, arch: arm64}
-          - {os: windows-2025, platform: win32, arch: x64}
-          - {os: ubuntu-24.04, platform: linux, arch: x64}
+        include: ${{ fromJSON(inputs.platform == 'win32' && '[{"os":"windows-2025","platform":"win32","arch":"x64"}]' || '[{"os":"macos-15","platform":"darwin","arch":"arm64"},{"os":"windows-2025","platform":"win32","arch":"x64"},{"os":"ubuntu-24.04","platform":"linux","arch":"x64"}]') }}
     env:
       SOURCE_SHA: ${{ inputs.source_commit }}
     steps:
@@ -61,6 +65,9 @@ jobs:
           cache-dependency-path: |
             source/package-lock.json
             source/desktop-tauri/package-lock.json
+      - name: Validate private Windows diagnostic identity and redaction
+        if: runner.os == 'Windows'
+        run: node --test .github/scripts/tests/windows-diagnostics.test.mjs .github/scripts/tests/private-diagnostics.test.mjs
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
       - name: Prepare reviewed native dependency without building Runner
