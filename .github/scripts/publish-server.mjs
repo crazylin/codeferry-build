@@ -12,8 +12,8 @@ export function validateReleaseSet(records,{sourceSha,desktopVersion,gatewayVers
   for(const row of records) {
     const gateway=row.component==='gateway', expectedVersion=gateway?gatewayVersion:desktopVersion;
     const name=gateway?`CodeFerry-gateway-${gatewayVersion}-linux-x64.tar.gz`:artifactName(desktopVersion,row.platform,row.arch,row.format);
-    const updater=!gateway && ['tar.gz','exe','AppImage'].includes(row.format);
-    if(!required.delete([row.component,row.platform,row.arch,row.format].join(':')) || row.version!==expectedVersion || row.sourceCommit!==sourceSha || row.filename!==name || row.channel!=='stable' || row.variant!=='full' || row.clientEngine!==(gateway?'native':'tauri') || !Number.isSafeInteger(row.size) || row.size<1 || row.size>(gateway?2*1024**3:512*1024**2) || !/^[a-f0-9]{64}$/.test(row.sha256??'') || (updater && (typeof row.updaterSignature!=='string'||row.updaterSignature.length<64||row.updaterSignature.length>4096||row.updateTarget!==targetFor(row.platform,row.arch))) || (!updater && (row.updaterSignature!==undefined||row.updateTarget!==undefined))) throw Error('RELEASE_BUILD_SET_INVALID');
+    const updater=!gateway && ['tar.gz','exe','AppImage','deb'].includes(row.format);
+    if(!required.delete([row.component,row.platform,row.arch,row.format].join(':')) || row.version!==expectedVersion || row.sourceCommit!==sourceSha || row.filename!==name || row.channel!=='stable' || row.variant!=='full' || row.clientEngine!==(gateway?'native':'tauri') || !Number.isSafeInteger(row.size) || row.size<1 || row.size>(gateway?2*1024**3:512*1024**2) || !/^[a-f0-9]{64}$/.test(row.sha256??'') || (updater && (typeof row.updaterSignature!=='string'||row.updaterSignature.length<64||row.updaterSignature.length>4096||row.updateTarget!==targetFor(row.platform,row.arch,row.format))) || (!updater && (row.updaterSignature!==undefined||row.updateTarget!==undefined))) throw Error('RELEASE_BUILD_SET_INVALID');
   }
 }
 async function main() {

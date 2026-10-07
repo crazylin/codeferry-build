@@ -13,13 +13,13 @@ export async function identity(path) {
   if (bytes !== info.size) throw Error('ASSET_CHANGED');
   return { size: bytes, sha256: hash.digest('hex') };
 }
-export function targetFor(platform, arch) { return ({'darwin:arm64':'darwin-aarch64','win32:x64':'windows-x86_64','linux:x64':'linux-x86_64'})[platform + ':' + arch]; }
+export function targetFor(platform, arch, format) { const base = ({'darwin:arm64':'darwin-aarch64','win32:x64':'windows-x86_64','linux:x64':'linux-x86_64'})[platform + ':' + arch]; return base && platform==='linux' && ['deb','AppImage'].includes(format) ? base + (format==='deb'?'-deb':'-appimage') : base; }
 export function artifactName(version, platform, arch, format) { return `CodeFerry-${version}-${platform}-${arch}${format === 'tar.gz' ? '.app.tar.gz' : '.' + format}`; }
 export function expectedMetadata(component, version, platform, arch, variant, filename, sourceCommit, format = 'tar.gz', signature) {
   if (!VERSION.test(version) || !/^[a-f0-9]{40}$/.test(sourceCommit) || !targetFor(platform, arch) || variant !== 'full' || !['desktop','gateway'].includes(component)) throw Error('ASSET_METADATA_INVALID');
-  const updater = component === 'desktop' && ['tar.gz','exe','AppImage'].includes(format);
+  const updater = component === 'desktop' && ['tar.gz','exe','AppImage','deb'].includes(format);
   return { component, version, platform, arch, variant, filename, sourceCommit, channel: 'stable', clientEngine: component === 'desktop' ? 'tauri' : 'native',
-    format, notes: 'CodeFerry verified build ' + sourceCommit.slice(0, 12), ...(updater ? {updaterSignature:signature, updateTarget:targetFor(platform,arch)} : {}) };
+    format, notes: 'CodeFerry verified build ' + sourceCommit.slice(0, 12), ...(updater ? {updaterSignature:signature, updateTarget:targetFor(platform,arch,format)} : {}) };
 }
 function decoded(value, maximum) {
   if (typeof value !== 'string' || value.length > maximum || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw Error('ASSET_SIGNATURE_INVALID');
@@ -71,7 +71,7 @@ export async function collectTauri(source, platform = process.platform, arch = p
   for(const format of formats) {
     const suffix=format==='tar.gz'?'.app.tar.gz':'.'+format;
     const candidates=files.filter(file=>file.endsWith(suffix)); if(candidates.length!==1) throw Error('ASSET_BUNDLE_SET_INVALID');
-    const file=candidates[0], updater=['tar.gz','exe','AppImage'].includes(format);
+    const file=candidates[0], updater=['tar.gz','exe','AppImage','deb'].includes(format);
     let signature; if(updater) { const info=await lstat(file+'.sig'); if(!info.isFile()||info.isSymbolicLink()||info.size<1||info.size>4096) throw Error('ASSET_SIGNATURE_INVALID'); signature=(await readFile(file+'.sig','utf8')).trim(); await verifyTauriSignature(file,signature,pub,pkg.version); }
     const name=artifactName(pkg.version,platform,arch,format), output=join(destination,name);
     await copyFile(file,output,constants.COPYFILE_EXCL);

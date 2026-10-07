@@ -1,0 +1,72 @@
+name: Finish signed verified publication
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: codeferry-official-release
+  cancel-in-progress: false
+jobs:
+  recover:
+    name: Finish remaining signed artifacts and backup-gated gateway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      SOURCE_SHA: 5cbb746b024cbc12e81333fcc74c82cd596bc02d
+    steps:
+      - name: Configure private artifact directory
+        run: echo "ASSET_DIR=$RUNNER_TEMP/verified-release-assets" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: 5cbb746b024cbc12e81333fcc74c82cd596bc02d
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+      - name: Test fail-closed recovery guards
+        run: node --test .github/scripts/tests/publication-recovery.test.mjs
+      - name: Download existing private immutable artifacts without rebuilding
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          test "$(gh api repos/crazylin/codeferry --jq .private)" = true
+          mkdir -p "$ASSET_DIR"
+          gh release download build-37628859938-1 --repo crazylin/codeferry --dir "$ASSET_DIR"
+      - name: Download previous bounded mutation journal
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          mkdir "$RUNNER_TEMP/previous-recovery"
+          gh release download publication-recovery-37639850043-1 --repo crazylin/codeferry --pattern publication-recovery.json --dir "$RUNNER_TEMP/previous-recovery"
+      - name: Install locked signing CLI without lifecycle scripts
+        run: node .github/scripts/ci-task.mjs recovery-sign-dependencies npm --prefix source/desktop-tauri ci --ignore-scripts --no-audit --no-fund
+      - name: Verify prior gates, sign unchanged Debian bytes and finish remaining publication
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node .github/scripts/finish-verified-publication.mjs
+      - name: Preserve bounded publication journal privately
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          if test -f "$RUNNER_TEMP/publication-finish.json"; then
+            test "$(gh api repos/crazylin/codeferry --jq .private)" = true
+            assets=("$RUNNER_TEMP/publication-finish.json")
+            if test -f "$RUNNER_TEMP/debian-signing-evidence.json"; then assets+=("$RUNNER_TEMP/debian-signing-evidence.json"); fi
+            gh release create "publication-finish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "${assets[@]}" --repo crazylin/codeferry --draft --target "$SOURCE_SHA" --title 'Private publication recovery journal' --notes 'Bounded request outcomes; never automatically replay an unknown mutation.' >/dev/null 2>&1
+            echo PRIVATE_RECOVERY_JOURNAL_SAVED
+          fi
+      - name: Finalize original private verified build
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: gh release edit build-37628859938-1 --repo crazylin/codeferry --draft=false

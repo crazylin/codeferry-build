@@ -279,6 +279,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: node .github/scripts/ci-task.mjs tauri-macos-finalize node source/scripts/finalize-macos-package.mjs
+      - name: Ensure Debian installer has an official version-bound signature
+        if: matrix.platform == 'linux'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node .github/scripts/ci-task.mjs sign-debian node .github/scripts/sign-debian.mjs
       - name: Verify official updater signatures and collect installer artifacts
         run: node .github/scripts/ci-task.mjs collect-tauri node .github/scripts/assets.mjs tauri source
       - name: Upload verified assets only to private build release

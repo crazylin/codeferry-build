@@ -30,7 +30,8 @@ async function fixture(body) {
     await writeFile(join(desktop, 'updater.pub'), Buffer.from(`untrusted comment: test fixture\n${publicPacket.toString('base64')}\n`).toString('base64'));
     await writeFile(appimage, bytes);
     await writeFile(appimage + '.sig', encodedSignature);
-    await writeFile(deb, 'Debian installer test bytes');
+    await writeFile(deb, bytes);
+    await writeFile(deb + '.sig', encodedSignature);
     await body({ root, bundle, appimage, deb, destination });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -55,7 +56,8 @@ test('collects verified top-level Linux installers while ignoring native AppDir 
     'CodeFerry-0.2.1-linux-x64.deb.metadata.json',
   ]);
   const metadata = JSON.parse(await readFile(join(f.destination, names[1]), 'utf8'));
-  assert.equal(metadata.updateTarget, 'linux-x86_64');
+  assert.equal(metadata.updateTarget, 'linux-x86_64-appimage');
+  const debMetadata=JSON.parse(await readFile(join(f.destination,names[3]),'utf8'));assert.equal(debMetadata.updateTarget,'linux-x86_64-deb');assert.ok(debMetadata.updaterSignature);
   assert.equal(metadata.sourceCommit, sourceCommit);
   assert.equal(metadata.sha256, createHash('sha256').update(await readFile(f.appimage)).digest('hex'));
   await assert.rejects(collectTauri(f.root, 'linux', 'x64', f.destination, sourceCommit), { code: 'EEXIST' });
@@ -95,3 +97,5 @@ test('installer-directory discovery is bounded', async () => fixture(async f => 
   await Promise.all(Array.from({ length: 255 }, (_, index) => writeFile(join(f.bundle, 'appimage', `staging-${index}`), '')));
   await assert.rejects(collectTauri(f.root, 'linux', 'x64', f.destination, sourceCommit), /ASSET_BUNDLE_INVALID/);
 }));
+
+test('unsigned Debian installer is refused before publication',async()=>fixture(async f=>{await rm(f.deb+'.sig');await assert.rejects(collectTauri(f.root,'linux','x64',f.destination,sourceCommit));}));
