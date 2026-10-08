@@ -64,7 +64,8 @@ async function run() {
   // logs for resumed upload; instead bind the recovery to its exact draft tag,
   // expected two asset identities, pinned source, and full SHA-256 bytes.
   assert.equal(gh('repos/crazylin/codeferry').private, true);
-  const release = gh('repos/crazylin/codeferry/releases/tags/build-' + PLAN.originalRun + '-1');
+  const release = gh('repos/crazylin/codeferry/releases/406985511');
+  assert.equal(release.id, 406985511, 'PRIVATE_RELEASE_ID_CHANGED');
   assert.equal(release.draft, true, 'PRIVATE_BUILD_DRAFT_ALREADY_FINALIZED');
   assert.equal(release.tag_name, 'build-' + PLAN.originalRun + '-1');
   assert.equal(release.target_commitish, PLAN.source);
