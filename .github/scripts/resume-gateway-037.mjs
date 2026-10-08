@@ -130,9 +130,9 @@ async function run() {
         await writeFile(chunkFile, bytes, { mode: 0o600 });
         const hash = createHash('sha256').update(bytes).digest('hex');
         await record('CHUNK_PUT_START', { index, size: length });
-        // Use HTTP/2 curl to avoid the hanging Node fetch transport observed
+        // Use HTTP/1.1 curl to avoid the hanging Node fetch transport observed
         // in the original run. Pass the secret only over stdin config, not argv.
-        const args = ['-q', '--config', '-', '--http2', '--silent', '--show-error',
+        const args = ['-q', '--config', '-', '--http1.1', '--silent', '--show-error',
           '--connect-timeout', '15', '--max-time', '180', '--max-redirs', '0',
           '--request', 'PUT', '--header', 'Expect:',
           '--header', 'Content-Type: application/octet-stream',
