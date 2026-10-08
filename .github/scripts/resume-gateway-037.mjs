@@ -59,19 +59,20 @@ function gh(path) {
 async function run() {
   const key = process.env.CODEFERRY_PUBLISH_KEY;
   assert.match(key ?? '', /^cfr_publish_[A-Za-z0-9_-]{8,500}$/);
-  const run = gh('repos/crazylin/codeferry-build/actions/runs/' + PLAN.originalRun);
-  assert.equal(run.event, 'workflow_dispatch');
-  assert.equal(run.status, 'completed');
-  assert.equal(run.conclusion, 'failure');
-  const jobs = gh('repos/crazylin/codeferry-build/actions/runs/' + PLAN.originalRun + '/jobs?per_page=100').jobs;
-  for (const name of ['Resolve one immutable private source commit',
-    'Contracts and real PostgreSQL Redis validation',
-    'Create one private immutable build draft',
-    'Embedded gateway Docker image linux amd64']) {
-    assert.equal(jobs.filter(job => job.name === name && job.conclusion === 'success').length, 1);
-  }
-  assert.equal(jobs.filter(job => job.name === 'Publish verified release set and update gateway' && job.conclusion === 'failure').length, 1);
+  // The original Actions run may be pruned by build-log retention after its
+  // immutable private GitHub Release is created. Never require historical run
+  // logs for resumed upload; instead bind the recovery to its exact draft tag,
+  // expected two asset identities, pinned source, and full SHA-256 bytes.
   assert.equal(gh('repos/crazylin/codeferry').private, true);
+  const release = gh('repos/crazylin/codeferry/releases/tags/build-' + PLAN.originalRun + '-1');
+  assert.equal(release.draft, true, 'PRIVATE_BUILD_DRAFT_ALREADY_FINALIZED');
+  assert.equal(release.tag_name, 'build-' + PLAN.originalRun + '-1');
+  assert.equal(release.target_commitish, PLAN.source);
+  assert.equal(release.assets?.length, 2);
+  const expectedNames = [PLAN.filename, PLAN.filename + '.metadata.json'].sort();
+  assert.deepEqual(release.assets.map(a => a.name).sort(), expectedNames);
+  assert.equal(release.assets.find(a => a.name === PLAN.filename).size, PLAN.size);
+  assert.ok(release.assets.every(a => a.state === 'uploaded'));
   assert.equal(execFileSync('git', ['-C', resolve('source'), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), PLAN.source);
 
   const meta = JSON.parse(await readFile(join(process.env.ASSET_DIR, PLAN.filename + '.metadata.json'), 'utf8'));
