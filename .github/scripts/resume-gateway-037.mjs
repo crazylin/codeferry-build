@@ -132,7 +132,7 @@ async function run() {
         await record('CHUNK_PUT_START', { index, size: length });
         // Use HTTP/1.1 curl to avoid the hanging Node fetch transport observed
         // in the original run. Pass the secret only over stdin config, not argv.
-        const args = ['-q', '--config', '-', '--http1.1', '--silent', '--show-error',
+        const args = ['-q', '--config', '-', '--http1.1', '--noproxy', '*', '--resolve', 'codeferry.link:443:8.209.235.150', '--silent', '--show-error',
           '--connect-timeout', '15', '--max-time', '180', '--max-redirs', '0',
           '--request', 'PUT', '--header', 'Expect:',
           '--header', 'Content-Type: application/octet-stream',
