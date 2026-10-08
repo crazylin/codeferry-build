@@ -1,0 +1,45 @@
+name: Deploy verified existing Gateway 0.3.7
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: codeferry-release-publication
+  cancel-in-progress: false
+jobs:
+  deploy:
+    name: Backup-gated existing immutable gateway deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Define private artifact directory
+        run: echo "ASSET_DIR=$RUNNER_TEMP/gateway-037-metadata" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+      - name: Verify published gateway identity guard
+        run: node --test .github/scripts/tests/deploy-verified-gateway-037.test.mjs
+      - name: Download only immutable published gateway metadata
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          test "$(gh api repos/crazylin/codeferry --jq .private)" = true
+          mkdir -p "$ASSET_DIR"
+          gh release download build-37800222913-1 --repo crazylin/codeferry --pattern 'CodeFerry-gateway-0.3.7-linux-x64.tar.gz.metadata.json' --dir "$ASSET_DIR"
+      - name: Deploy existing verified Gateway image with backup
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+        run: node .github/scripts/deploy-verified-gateway-037.mjs
+      - name: Preserve private deployment evidence
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          if test -f "$RUNNER_TEMP/gateway-037-deployment-journal.json"; then
+            gh release create "gateway037-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$RUNNER_TEMP/gateway-037-deployment-journal.json" --repo crazylin/codeferry --draft --target 647d11431d947c6d3b81798173eb1b3ddb3419fe --title 'Private Gateway 0.3.7 deployment evidence' --notes 'Bounded deployment journal; no credentials'
+          fi
