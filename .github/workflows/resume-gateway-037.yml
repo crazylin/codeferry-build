@@ -1,4 +1,4 @@
-name: Resume verified Gateway 0.3.7
+name: Resume verified Gateway 0.3.7 publication
 on:
   workflow_dispatch:
 permissions:
@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   recover:
-    name: Resume exact verified gateway upload and backup-gated deployment
+    name: Resume exact verified gateway upload without deployment
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -39,10 +39,11 @@ jobs:
           test "$(gh api repos/crazylin/codeferry --jq .private)" = true
           mkdir -p "$ASSET_DIR"
           gh release download build-37800222913-1 --repo crazylin/codeferry --dir "$ASSET_DIR"
-      - name: Resume existing upload and submit one backup-gated deployment
+      - name: Resume existing upload and publish without deployment
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+          DEFER_GATEWAY_DEPLOYMENT: "true"
         run: node .github/scripts/resume-gateway-037.mjs
       - name: Preserve bounded recovery journal privately
         if: always()
@@ -52,7 +53,7 @@ jobs:
           if test -f "$RUNNER_TEMP/gateway-037-recovery-journal.json"; then
             gh release create "gateway037-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" "$RUNNER_TEMP/gateway-037-recovery-journal.json" --repo crazylin/codeferry --draft --target "$SOURCE_SHA" --title 'Private Gateway 0.3.7 recovery journal' --notes 'Bounded upload and deployment recovery journal; no credentials'
           fi
-      - name: Finalize original verified build after proven deployment
+      - name: Finalize original verified artifact after confirmed publication
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: gh release edit build-37800222913-1 --repo crazylin/codeferry --draft=false

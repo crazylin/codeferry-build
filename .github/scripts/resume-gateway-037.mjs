@@ -175,6 +175,11 @@ async function run() {
   assert.equal(publish.status, 'published');
   assert.equal(publish.sha256, PLAN.sha256);
   await record('RELEASE_PUBLISHED');
+  if (process.env.DEFER_GATEWAY_DEPLOYMENT === 'true') {
+    await record('DEPLOYMENT_DEFERRED_PENDING_MIGRATION_REVIEW');
+    console.log('GATEWAY_037_PUBLISHED_NO_DEPLOYMENT_REQUEST');
+    return;
+  }
 
   // Only one deployment POST; a lost response is an uncertain outcome.
   const deployment = (await api('/api/releases/' + PLAN.release + '/deploy', 'POST', {},
