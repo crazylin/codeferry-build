@@ -1,0 +1,34 @@
+name: Inspect Gateway deployment 0.3.6
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    name: Read existing deployment status without mutations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+      - name: Read exact existing deployment result
+        env:
+          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+        run: |
+          node --input-type=module <<'JS'
+          const id='cb765166-bd1f-4594-9bba-8d3a492da63c';
+          const k=process.env.CODEFERRY_PUBLISH_KEY;
+          if(!/^cfr_publish_[A-Za-z0-9_-]{8,500}$/.test(k??'')) throw Error('PUBLISH_KEY_MISSING');
+          const r=await fetch('https://codeferry.link/api/deployments/'+id,{
+            headers:{authorization:'Bearer '+k},
+            redirect:'error',signal:AbortSignal.timeout(15000)});
+          if(!r.ok)throw Error('DEPLOY_READ_HTTP_'+r.status);
+          const data=await r.json();
+          if(data.deployment?.id!==id)throw Error('DEPLOY_ID_MISMATCH');
+          const d=data.deployment;
+          console.log('EXISTING_DEPLOYMENT_RESULT='+JSON.stringify({
+            id:d.id,releaseId:d.release_id,status:d.status,
+            errorCode:d.error_code,startedAt:d.started_at,finishedAt:d.finished_at
+          }));
+          JS
