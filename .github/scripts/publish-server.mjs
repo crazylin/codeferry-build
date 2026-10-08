@@ -5,9 +5,9 @@ import { identity, artifactName, targetFor, verifyTauriSignature } from './asset
 export function requireProductionEngine(engine='tauri') { if(engine!=='tauri') throw Error('CLIENT_ENGINE_INVALID'); }
 export function validateReleaseSet(records,{sourceSha,desktopVersion,gatewayVersion,scope='all'}) {
   const version=/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
-  if(!['all','gateway'].includes(scope)||!/^[a-f0-9]{40}$/.test(sourceSha??'')||![desktopVersion,gatewayVersion].every(v=>version.test(v??''))) throw Error('RELEASE_BUILD_CONFIGURATION_INVALID');
-  const required=new Set(['gateway:linux:x64:tar.gz']);
-  if(scope==='all') for(const [platform,arch,formats] of [['darwin','arm64',['dmg','tar.gz']],['win32','x64',['exe']],['linux','x64',['AppImage','deb']]]) for(const format of formats) required.add(['desktop',platform,arch,format].join(':'));
+  if(!['all','gateway','desktop'].includes(scope)||!/^[a-f0-9]{40}$/.test(sourceSha??'')||![desktopVersion,gatewayVersion].every(v=>version.test(v??''))) throw Error('RELEASE_BUILD_CONFIGURATION_INVALID');
+  const required=new Set(scope==='desktop'?[]:['gateway:linux:x64:tar.gz']);
+  if(scope!=='gateway') for(const [platform,arch,formats] of [['darwin','arm64',['dmg','tar.gz']],['win32','x64',['exe']],['linux','x64',['AppImage','deb']]]) for(const format of formats) required.add(['desktop',platform,arch,format].join(':'));
   if(records.length!==required.size) throw Error('RELEASE_BUILD_SET_INCOMPLETE');
   for(const row of records) {
     const gateway=row.component==='gateway', expectedVersion=gateway?gatewayVersion:desktopVersion;
@@ -34,6 +34,6 @@ async function main() {
   const {publishArtifact}=await import(pathToFileURL(join(source,'scripts/publish-release.mjs')));
   records.sort((a,b)=>(a.component==='gateway'?1:0)-(b.component==='gateway'?1:0)||a.filename.localeCompare(b.filename));
   for(const row of records) { await publishArtifact({file:join(directory,row.filename),metadata:row,key:process.env.CODEFERRY_PUBLISH_KEY,deploy:row.component==='gateway'&&process.env.DEPLOY_GATEWAY!=='false',waitDeployment:true}); console.log('RELEASE_COMPONENT_PUBLISHED_'+row.component.toUpperCase()); }
-  console.log('SERVER_RELEASE_SET_AND_GATEWAY_DEPLOYMENT_COMPLETE');
+  console.log('SERVER_RELEASE_SET_COMPLETE');
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(error=>{console.error(typeof error.code==='string'&&/^[A-Z_0-9]+$/.test(error.code)?error.code:'SERVER_PUBLICATION_FAILED');process.exitCode=1;});

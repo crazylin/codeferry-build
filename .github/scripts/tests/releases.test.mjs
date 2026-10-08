@@ -22,6 +22,9 @@ test('complete signed Tauri set requires five installers and one embedded gatewa
  assert.throws(()=>validateReleaseSet(rows.slice(1),options),/INCOMPLETE/);
  const duplicate=[...rows];duplicate[0]=duplicate[1];assert.throws(()=>validateReleaseSet(duplicate,options),/INVALID/);
  validateReleaseSet(rows.filter(row=>row.component==='gateway'),{...options,scope:'gateway'});
+ validateReleaseSet(rows.filter(row=>row.component==='desktop'),{...options,scope:'desktop'});
+ assert.throws(()=>validateReleaseSet(rows.filter(row=>row.component==='desktop').slice(1),{...options,scope:'desktop'}),/INCOMPLETE/);
+ assert.throws(()=>validateReleaseSet(rows,{...options,scope:'desktop'}),/INCOMPLETE/);
  assert.throws(()=>validateReleaseSet(rows,{...options,scope:'gateway'}),/INCOMPLETE/);
 });
 test('source version filename channel engine target signature size digest are exact',()=>{
@@ -75,3 +78,13 @@ test('symlink executable or symlink target subtree is never staged', async () =>
   await symlink(join(target, 'release'), join(target, 'linked'), 'dir');
   await assert.rejects(resolveGatewayBinary(source, join(target, 'linked/codeferry-gateway')), /SYMLINK/);
 }));
+
+test('desktop-only CI release is gated on signed desktop matrix and cannot build or publish gateway', async () => {
+ const workflow=await readFile(new URL('../../workflows/desktop-clients.yml',import.meta.url),'utf8');
+ assert.match(workflow,/options: \[all, gateway, desktop\]/);
+ assert.match(workflow,/inputs\.release_scope != 'desktop'/);
+ assert.match(workflow,/needs\.gateway\.result == 'skipped' && inputs\.release_scope == 'desktop'/);
+ const desktop=records().filter(row=>row.component==='desktop');
+ validateReleaseSet(desktop,{...options,scope:'desktop'});
+ assert.throws(()=>validateReleaseSet(desktop.filter(row=>row.format!=='tar.gz'),{...options,scope:'desktop'}),/INCOMPLETE/);
+});

@@ -16,7 +16,7 @@ on:
         description: Publish complete Tauri clients and gateway, or only the gateway
         required: true
         type: choice
-        options: [all, gateway]
+        options: [all, gateway, desktop]
         default: gateway
   push:
     branches: [master]
@@ -191,7 +191,7 @@ jobs:
   package:
     name: Signed Tauri desktop ${{ matrix.platform }} ${{ matrix.arch }}
     needs: [resolve, validate, prepare-release]
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_scope == 'all' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_scope != 'gateway' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
@@ -310,6 +310,7 @@ jobs:
   gateway:
     name: Embedded gateway Docker image linux amd64
     needs: [resolve, validate, prepare-release]
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_scope != 'desktop' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
@@ -403,7 +404,7 @@ jobs:
   publish:
     name: Publish verified release set and update gateway
     needs: [resolve, validate, package, gateway]
-    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.validate.result == 'success' && needs.gateway.result == 'success' && (needs.package.result == 'success' || (needs.package.result == 'skipped' && inputs.release_scope == 'gateway')) }}
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.validate.result == 'success' && (needs.gateway.result == 'success' || (needs.gateway.result == 'skipped' && inputs.release_scope == 'desktop')) && (needs.package.result == 'success' || (needs.package.result == 'skipped' && inputs.release_scope == 'gateway')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
