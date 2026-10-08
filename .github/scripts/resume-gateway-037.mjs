@@ -42,8 +42,12 @@ function gh(path) {
   // Retry ONLY read-only GitHub API requests; release mutations remain never retried.
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      const isBuilder = path.startsWith('repos/crazylin/codeferry-build/');
+      const token = isBuilder ? process.env.CI_BUILDER_READ_TOKEN : process.env.CI_SOURCE_READ_TOKEN;
+      assert.ok(typeof token === 'string' && token.length > 20 && !/\s/.test(token), 'READ_ONLY_CI_TOKEN_MISSING');
       return JSON.parse(execFileSync('gh', ['api', path], {
         encoding: 'utf8', timeout: 60000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, GH_TOKEN: token },
       }));
     } catch {
       if (attempt === 2) throw Error('READ_ONLY_GITHUB_API_UNAVAILABLE');

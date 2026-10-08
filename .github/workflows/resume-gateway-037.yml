@@ -41,7 +41,8 @@ jobs:
           gh release download build-37800222913-1 --repo crazylin/codeferry --dir "$ASSET_DIR"
       - name: Resume existing upload and publish without deployment
         env:
-          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CI_BUILDER_READ_TOKEN: ${{ github.token }}
+          CI_SOURCE_READ_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
           DEFER_GATEWAY_DEPLOYMENT: "true"
         run: node .github/scripts/resume-gateway-037.mjs
