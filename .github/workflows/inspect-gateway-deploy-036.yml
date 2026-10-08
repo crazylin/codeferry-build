@@ -28,7 +28,7 @@ jobs:
           if(data.deployment?.id!==id)throw Error('DEPLOY_ID_MISMATCH');
           const d=data.deployment;
           console.log('EXISTING_DEPLOYMENT_RESULT='+JSON.stringify({
-            id:d.id,releaseId:d.release_id,status:d.status,
-            errorCode:d.error_code,startedAt:d.started_at,finishedAt:d.finished_at
+            id:d.id,releaseId:d.releaseId,status:d.status,
+            errorCode:d.errorCode,startedAt:d.startedAt,finishedAt:d.finishedAt
           }));
           JS
