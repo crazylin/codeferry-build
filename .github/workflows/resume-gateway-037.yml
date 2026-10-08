@@ -13,9 +13,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      ASSET_DIR: ${{ runner.temp }}/gateway-037
       SOURCE_SHA: 647d11431d947c6d3b81798173eb1b3ddb3419fe
     steps:
+      - name: Set private artifact directory
+        run: echo "ASSET_DIR=$RUNNER_TEMP/gateway-037" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
