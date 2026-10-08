@@ -39,9 +39,17 @@ export function validateUpload(upload, now = Date.now()) {
 }
 
 function gh(path) {
-  return JSON.parse(execFileSync('gh', ['api', path], {
-    encoding: 'utf8', timeout: 60000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
-  }));
+  // Retry ONLY read-only GitHub API requests; release mutations remain never retried.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return JSON.parse(execFileSync('gh', ['api', path], {
+        encoding: 'utf8', timeout: 60000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+      }));
+    } catch {
+      if (attempt === 2) throw Error('READ_ONLY_GITHUB_API_UNAVAILABLE');
+      execFileSync('sleep', ['2'], { stdio: 'ignore', timeout: 10000 });
+    }
+  }
 }
 
 async function run() {
