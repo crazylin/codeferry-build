@@ -268,6 +268,10 @@ jobs:
       run:
         shell: pwsh
     steps:
+      - name: Preserve exact LF bytes before all Windows Git checkouts
+        run: |
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_GIT_EOL_SETUP_FAILED' }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {persist-credentials: false}
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
