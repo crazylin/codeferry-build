@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 export const PROOFS = Object.freeze([
   'windows_real_runner_executable_starts_inside_appcontainer_without_credentials',
+  'windows_unavailable_workspace_filter_never_requests_enrollment',
   'windows_appcontainer_read_only_additional_root_denies_writes',
   'windows_real_runner_nested_broker_appcontainer_no_credentials',
 ]);
