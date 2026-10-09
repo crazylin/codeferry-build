@@ -256,3 +256,63 @@ jobs:
           node ../../.github/scripts/ci-task.mjs tauri-build npm run build
           node ../../.github/scripts/ci-task.mjs tauri-ui npm run test:ui
           node ../../.github/scripts/ci-task.mjs tauri-rust cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+  desktop-windows-guard:
+    name: Windows native desktop fail-closed and process-tree acceptance (no publication)
+    needs: resolve
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - name: Verify exact private source commit
+        run: |
+          if ((git -C source rev-parse HEAD).Trim() -ne $env:SOURCE_SHA) { throw 'WINDOWS_SOURCE_SHA_MISMATCH' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - name: Use pinned Windows Rust toolchain
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'RUSTUP_TOOLCHAIN_INSTALL_FAILED' }
+          rustup default 1.96.0
+          if ($LASTEXITCODE -ne 0) { throw 'RUSTUP_DEFAULT_FAILED' }
+          rustc --version
+          if ($LASTEXITCODE -ne 0) { throw 'RUSTC_UNAVAILABLE' }
+      - name: Install locked dependencies and verify exact native source patch
+        run: |
+          npm --prefix source ci
+          if ($LASTEXITCODE -ne 0) { throw 'SOURCE_NPM_CI_FAILED' }
+          node .github/scripts/prepare-source.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'NATIVE_SOURCE_PREPARE_FAILED' }
+          npm --prefix source/desktop-tauri ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'TAURI_NPM_CI_FAILED' }
+      - name: Build trusted Tauri frontend
+        run: |
+          npm --prefix source/desktop-tauri run build
+          if ($LASTEXITCODE -ne 0) { throw 'TAURI_FRONTEND_BUILD_FAILED' }
+      - name: Verify Windows Workspace Write explicitly fails closed
+        run: |
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_workspace_write_never_downgrades_to_full_access -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_WORKSPACE_FAIL_CLOSED_FAILED' }
+      - name: Verify Runner Windows Job Object never permits silent breakaway
+        run: |
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_runner_job_object_disallows_silent_child_breakaway -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_RUNNER_JOB_OWNERSHIP_FAILED' }
+      - name: Verify real Windows process tree containment
+        run: |
+          cargo test --locked --manifest-path source/upstream/webcodex/Cargo.toml -p webcodex-process --test managed_child explicit_terminate_kills_tree -- --include-ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_JOB_TERMINATION_FAILED' }
+          cargo test --locked --manifest-path source/upstream/webcodex/Cargo.toml -p webcodex-process --test managed_child drop_kills_tree -- --include-ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_JOB_DROP_FAILED' }
