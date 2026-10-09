@@ -353,6 +353,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_BROKER_EXECUTABLE_FAIL_CLOSED_FAILED' }
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_broker_executable_native_handle_allowlist_and_job -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_BROKER_NATIVE_HANDLE_LIST_JOB_FAILED' }
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_production_broker_bootstrap_hash_and_denial -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_PRODUCTION_BROKER_BOOTSTRAP_FAILED' }
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_broker_executable_deadlines_stalled_and_partial_frames -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_BROKER_STALLED_FRAME_DEADLINE_FAILED' }
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_broker_executable_one_shot_replay_and_cross_session_denial -- --nocapture --test-threads=1
