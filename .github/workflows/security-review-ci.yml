@@ -330,6 +330,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_UNLISTED_HOST_HANDLE_LEAK' }
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_concurrent_stdio_isolated -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_CONCURRENT_PIPES_FAILED' }
+      - name: Attest suspended AppContainer kernel token and exact package SID
+        run: |
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_attests_real_token_sid_before_resume -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_TOKEN_ATTESTATION_FAILED' }
       - name: Verify AppContainer NTFS junction hardlink ADS escape denial (real Windows)
         run: |
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_ntfs_alias_and_ads_do_not_escape_granted_acl -- --nocapture --test-threads=1
