@@ -186,6 +186,13 @@ jobs:
           npm --prefix source/desktop-tauri ci --ignore-scripts
       - name: Verify native baseline and exact source patch
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Verify native MCP guard hard-kill reaps provider and descendants
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ../.github/scripts/ci-task.mjs native-guard-build cargo build --locked --profile dogfood --manifest-path upstream/webcodex/Cargo.toml -p webcodex-runner --bin codeferry-runner
+          CODEFERRY_GUARD_RUNNER_BIN="$PWD/upstream/webcodex/target/dogfood/codeferry-runner" node ../.github/scripts/ci-task.mjs native-guard-process-tree python3 desktop-tauri/scripts/runner_guard_fixture.py
       - name: Verify Tauri application build
         working-directory: source/desktop-tauri
         run: |

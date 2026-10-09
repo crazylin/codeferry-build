@@ -14,6 +14,8 @@ test('security review workflow pins requested source and never publishes or depl
   assert.match(workflow, /TEST_REDIS_URL:/);
   assert.match(workflow, /--include-ignored --test-threads=1/);
   assert.match(workflow, /macOS native desktop review/);
+  assert.match(workflow, /native-guard-process-tree python3 desktop-tauri\/scripts\/runner_guard_fixture\.py/);
+  assert.match(workflow, /native-guard-build cargo build --locked --profile dogfood/);
   for (const forbidden of ['prepare-release:', 'publish:', 'deploy:', 'publish-server.mjs', 'docker push', 'gh release edit', 'deploy_gateway', 'private-cache.mjs save']) {
     assert.ok(!workflow.includes(forbidden), `Security CI must not do ${forbidden}`);
   }
