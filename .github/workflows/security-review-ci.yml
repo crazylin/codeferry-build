@@ -145,6 +145,56 @@ jobs:
       - name: Test host update worker migration and identity contracts
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs gateway-worker python3 -m unittest discover -s scripts/test -p release_worker_test.py
+  desktop-linux-landlock:
+    name: Linux Landlock Runner sandbox acceptance (no publication)
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      CODEFERRY_REQUIRE_LANDLOCK: '1'
+    steps:
+      - name: Verify Linux kernel sandbox capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          test "$(uname -s)" = Linux
+          git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - name: Verify pinned source identity
+        run: test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: '22.13.1'}
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Install native GTK and WebKit development dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf pkg-config
+      - name: Install locked dependencies and verify native source baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix source ci
+          node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Run actual Linux Landlock process and child write-denial tests
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ../.github/scripts/ci-task.mjs linux-landlock cargo test --locked --manifest-path desktop-tauri/src-tauri/Cargo.toml runner::sandbox -- --test-threads=1
+
   desktop-macos:
     name: macOS native desktop review (no publication)
     needs: resolve
