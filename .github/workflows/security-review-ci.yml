@@ -188,6 +188,12 @@ jobs:
           set -euo pipefail
           npm --prefix source ci
           node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Build trusted Tauri frontend required by the desktop Rust macros
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix source/desktop-tauri ci --ignore-scripts
+          npm --prefix source/desktop-tauri run build
       - name: Run actual Linux Landlock process and child write-denial tests
         working-directory: source
         shell: bash
