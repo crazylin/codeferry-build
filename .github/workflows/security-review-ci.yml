@@ -347,6 +347,13 @@ jobs:
           cargo build --locked --manifest-path source/upstream/webcodex/Cargo.toml -p webcodex-runner --bin codeferry-runner
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_RUNNER_BUILD_FAILED' }
           if (!(Test-Path 'source/upstream/webcodex/target/debug/codeferry-runner.exe')) { throw 'WINDOWS_REAL_RUNNER_IMAGE_MISSING' }
+      - name: Verify real Runner direct and independent-Broker AppContainer launch (no publication)
+        run: |
+          $env:CODEFERRY_RUNNER_TEST_EXE = (Resolve-Path 'source/upstream/webcodex/target/debug/codeferry-runner.exe').Path
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_real_runner_executable_starts_inside_appcontainer_without_credentials -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_RUNNER_APPCONTAINER_CLI_FAILED' }
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_real_runner_nested_broker_appcontainer_no_credentials -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_RUNNER_INDEPENDENT_BROKER_FAILED' }
       - name: Native standalone Broker executable protocol and denial acceptance (no publication)
         run: |
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml --bin codeferry-windows-broker -- --nocapture
