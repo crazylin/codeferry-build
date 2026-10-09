@@ -100,21 +100,15 @@ jobs:
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
           if [ "$RUNNER_OS" = "Windows" ]; then
             node ../../.github/scripts/ci-task.mjs windows-broker cargo build --locked --manifest-path src-tauri/Cargo.toml --bin codeferry-windows-broker
+            # Run exact kernel proofs before the broad Rust suite so a
+            # blocked Workspace Write boundary has its own non-secret label.
+            # These tests cannot authorize production workspace-write.
+            test -f "$CODEFERRY_RUNNER_TEST_EXE"
+            test -f "$CODEFERRY_BROKER_TEST_EXE"
+            node ../../.github/scripts/ci-task.mjs windows-real-runner-appcontainer node ../../.github/scripts/require-windows-real-runner.mjs
           fi
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked
-      - name: Require kernel-attested real Windows Runner and nested Broker proofs
-        if: runner.os == 'Windows'
-        shell: bash
-        working-directory: source/desktop-tauri
-        env:
-          CODEFERRY_RUNNER_TEST_EXE: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
-          CODEFERRY_BROKER_TEST_EXE: ${{ github.workspace }}/source/desktop-tauri/src-tauri/target/debug/codeferry-windows-broker.exe
-        run: |
-          set -euo pipefail
-          test -f "$CODEFERRY_RUNNER_TEST_EXE"
-          test -f "$CODEFERRY_BROKER_TEST_EXE"
-          node ../../.github/scripts/ci-task.mjs windows-real-runner-appcontainer node ../../.github/scripts/require-windows-real-runner.mjs
       - name: Test macOS native browser isolation and management IPC
         if: runner.os == 'macOS'
         working-directory: source/desktop-tauri
