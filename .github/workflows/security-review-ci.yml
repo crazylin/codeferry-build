@@ -314,6 +314,10 @@ jobs:
         run: |
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_runner_job_object_disallows_silent_child_breakaway -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_RUNNER_JOB_OWNERSHIP_FAILED' }
+      - name: Prove Windows native AppContainer filesystem boundary (test-only, no Runner enablement)
+        run: |
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_kernel_blocks_ungranted_writes -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_NATIVE_BOUNDARY_FAILED' }
       - name: Verify real Windows process tree containment
         run: |
           cargo test --locked --manifest-path source/upstream/webcodex/Cargo.toml -p webcodex-process --test managed_child explicit_terminate_kills_tree -- --include-ignored --test-threads=1
