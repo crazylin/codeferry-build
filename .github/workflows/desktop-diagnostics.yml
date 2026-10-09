@@ -70,11 +70,17 @@ jobs:
         run: node --test .github/scripts/tests/windows-diagnostics.test.mjs .github/scripts/tests/private-diagnostics.test.mjs
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
-      - name: Prepare reviewed native dependency without building Runner
+      - name: Prepare reviewed native source
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
       - name: Restore private desktop Rust dependencies
         env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
         run: node .github/scripts/private-cache.mjs restore desktop-${{ matrix.platform }}-${{ matrix.arch }}
+      - name: Build real Windows Runner from reviewed source
+        if: runner.os == 'Windows'
+        working-directory: source
+        env:
+          CODEFERRY_NATIVE_PROFILE: release
+        run: node ../.github/scripts/ci-task.mjs native-runtime node scripts/native-build.mjs
       - name: Install Linux native WebView build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libsecret-1-dev
@@ -84,12 +90,31 @@ jobs:
       - name: Build frontend and compile complete Rust client tests
         shell: bash
         working-directory: source/desktop-tauri
+        env:
+          CODEFERRY_TEST_RUNNER: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
+          CODEFERRY_RUNNER_TEST_EXE: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
+          CODEFERRY_BROKER_TEST_EXE: ${{ github.workspace }}/source/desktop-tauri/src-tauri/target/debug/codeferry-windows-broker.exe
         run: |
           set -euo pipefail
           node ../../.github/scripts/ci-task.mjs tauri-types npm run typecheck
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            node ../../.github/scripts/ci-task.mjs windows-broker cargo build --locked --manifest-path src-tauri/Cargo.toml --bin codeferry-windows-broker
+          fi
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Require kernel-attested real Windows Runner and nested Broker proofs
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: source/desktop-tauri
+        env:
+          CODEFERRY_RUNNER_TEST_EXE: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
+          CODEFERRY_BROKER_TEST_EXE: ${{ github.workspace }}/source/desktop-tauri/src-tauri/target/debug/codeferry-windows-broker.exe
+        run: |
+          set -euo pipefail
+          test -f "$CODEFERRY_RUNNER_TEST_EXE"
+          test -f "$CODEFERRY_BROKER_TEST_EXE"
+          node ../../.github/scripts/ci-task.mjs windows-real-runner-appcontainer node ../../.github/scripts/require-windows-real-runner.mjs
       - name: Test macOS native browser isolation and management IPC
         if: runner.os == 'macOS'
         working-directory: source/desktop-tauri
