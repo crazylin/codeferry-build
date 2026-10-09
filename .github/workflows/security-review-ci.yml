@@ -322,6 +322,14 @@ jobs:
         run: |
           cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_pipes_restrict_inherited_handles -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_PIPE_WHITELIST_FAILED' }
+      - name: Prove Windows AppContainer scoped inheritance and concurrent handle exclusion
+        run: |
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_scoped_pipe_handles_restore -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_INHERIT_SCOPE_FAILED' }
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_rejects_unlisted_inheritable_host_file -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_UNLISTED_HOST_HANDLE_LEAK' }
+          cargo test --locked --manifest-path source/desktop-tauri/src-tauri/Cargo.toml windows_appcontainer_concurrent_stdio_isolated -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_APPCONTAINER_CONCURRENT_PIPES_FAILED' }
       - name: Verify real Windows process tree containment
         run: |
           cargo test --locked --manifest-path source/upstream/webcodex/Cargo.toml -p webcodex-process --test managed_child explicit_terminate_kills_tree -- --include-ignored --test-threads=1
