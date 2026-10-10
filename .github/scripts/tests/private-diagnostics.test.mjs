@@ -17,7 +17,7 @@ test('private diagnostic collection excludes all signing and publication tasks',
     await writeFile(join(directory, 'arbitrary.log'), 'not allowlisted');
     assert.deepEqual(await collectDiagnostics(directory, {}), [{ task: 'tauri-contracts', truncated: false, tail: 'compiler fixture' }]);
     assert.ok(!diagnosticTasks.some(task => /bundle|finalize|publish/.test(task)));
-    for (const task of ['gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive', 'native-format', 'tauri-frontend-types']) assert.ok(diagnosticTasks.includes(task));
+    for (const task of ['gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive', 'native-format', 'tauri-frontend-types', 'windows-broker', 'windows-real-runner-appcontainer']) assert.ok(diagnosticTasks.includes(task));
     assert.ok(!diagnosticTasks.includes('collect-tauri'));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -10,6 +10,7 @@ export const diagnosticTasks = Object.freeze([
   'root-contracts', 'native-source', 'native-runtime', 'native-format', 'native-auth',
   'native-embedding', 'native-drain', 'gateway-contracts', 'gateway-worker',
   'tauri-types', 'tauri-frontend-types', 'tauri-frontend-build', 'tauri-contracts',
+  'windows-broker', 'windows-real-runner-appcontainer',
   'tauri-provider-guard', 'tauri-native-browser',
   'gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive',
 ]);
