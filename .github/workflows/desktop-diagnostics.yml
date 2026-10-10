@@ -93,6 +93,8 @@ jobs:
         env:
           # Execute the real Linux kernel namespace proof; missing bwrap is a CI failure.
           CODEFERRY_REQUIRE_BWRAP: ${{ runner.os == 'Linux' && '1' || '0' }}
+          # Windows Job Object cancellation must be proven on a real kernel.
+          CODEFERRY_REQUIRE_WINDOWS_MCP_JOB: ${{ runner.os == 'Windows' && '1' || '0' }}
           CODEFERRY_TEST_RUNNER: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
           CODEFERRY_RUNNER_TEST_EXE: ${{ github.workspace }}/source/runtime/codeferry-runner.exe
           CODEFERRY_BROKER_TEST_EXE: ${{ github.workspace }}/source/desktop-tauri/src-tauri/target/debug/codeferry-windows-broker.exe
