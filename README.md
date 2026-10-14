@@ -45,6 +45,18 @@ node .github/scripts/gateway-image.mjs --stage-only
 
 The current working directory must contain `source/` (a source alias is allowed locally). The binary must be a regular Linux amd64 ELF beneath that source's `gateway-rs/target`; no internal symlink is accepted. `gateway-image/build-info.json` contains version, source SHA, migration digest and image tag. Upload the prepared context and build with those exact args, `--platform linux/amd64 --provenance=false --sbom=false`; then perform actual image/identity/startup/drain and updater archive checks. Stage-only does not certify deployment or label dirty source as a reviewed release.
 
+## Backend acceptance without publication
+
+The manual preflight also accepts `platform=backend` on the backend feature branch. It runs only the Ubuntu backend job; the existing `all` and `win32` choices keep their desktop behavior. Select an exact source commit that includes `scripts/backend-acceptance.mjs`:
+
+```sh
+gh workflow run desktop-diagnostics.yml --repo crazylin/codeferry-build \
+  --ref codex/backend-preflight-2026-10-14 \
+  -f source_commit=<exact-40-character-source-SHA> -f platform=backend
+```
+
+This lane owns fresh digest-pinned PostgreSQL and Redis containers with loopback fixture URLs. PostgreSQL uses the explicitly disposable `codeferry_test` database; Redis uses database 0 on the job's fresh service. It checks the source identity, reproduces the upstream patch, builds TypeScript, runs source contracts and invokes the source's bounded backend acceptance helper. The helper must reject absent fixture configuration, nonexecuted database tests and missing required named results. Raw diagnostics and Rust dependency caches remain in private source drafts. The job has a 120-minute budget; it receives no product signing or publisher keys and never runs release or server replacement jobs. Passing it is actual disposable-service evidence, not validation of production data, a deployed server or provider OAuth.
+
 Local workflow contracts:
 
 ```sh

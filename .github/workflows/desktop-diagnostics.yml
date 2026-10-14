@@ -9,11 +9,11 @@ on:
         type: string
 
       platform:
-        description: Platform to diagnose without publishing
+        description: Desktop platform or backend services to diagnose without publishing
         required: true
         default: all
         type: choice
-        options: [all, win32]
+        options: [all, win32, backend]
 
 permissions:
   contents: read
@@ -29,6 +29,7 @@ env:
 jobs:
   preflight:
     name: Compile and diagnose ${{ matrix.platform }} ${{ matrix.arch }}
+    if: inputs.platform != 'backend'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -112,3 +113,98 @@ jobs:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           CODEFERRY_CACHE_COMPLETE: 'false'
         run: node .github/scripts/private-cache.mjs save desktop-${{ matrix.platform }}-${{ matrix.arch }}
+
+  backend:
+    name: Real isolated PostgreSQL and Redis acceptance
+    if: inputs.platform == 'backend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ inputs.source_commit }}
+      TEST_DATABASE_URL: postgres://codeferry:fixture-ci-password@127.0.0.1:5432/codeferry_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      RUSTUP_TOOLCHAIN: '1.96.0'
+    # Each job owns disposable services. No production database, Redis endpoint,
+    # bootstrap token, signing key or publication credential enters this lane.
+    services:
+      postgres:
+        image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: codeferry
+          POSTGRES_PASSWORD: fixture-ci-password
+          POSTGRES_DB: codeferry_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U codeferry -d codeferry_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - name: Validate exact backend source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'SOURCE_COMMIT_MUST_BE_EXACT_SHA'; exit 1; }
+          git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ inputs.source_commit }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - name: Verify exact backend checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Validate backend workflow contracts
+        run: node --test .github/scripts/tests/backend-preflight.test.mjs
+      - name: Install locked backend source dependencies
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-dependencies npm ci
+      - name: Install locked frontend contract dependencies
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-frontend-dependencies npm ci --ignore-scripts
+      - name: Reproduce reviewed native patch before gateway compilation
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Build TypeScript and run source contracts
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-contracts npm test
+      - name: Restore private gateway validation dependencies
+        continue-on-error: true
+        timeout-minutes: 15
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore validate-linux-x64
+      - name: Require named PostgreSQL and Redis tests to actually execute
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs gateway-contracts node scripts/backend-acceptance.mjs
+      - name: Preserve failed backend diagnostics privately
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_DIAGNOSTIC_ROLE: validate
+        run: node .github/scripts/save-private-diagnostics.mjs
+      - name: Save reusable gateway validation dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save validate-linux-x64
