@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const workflow = await readFile(new URL('../../workflows/desktop-diagnostics.yml', import.meta.url), 'utf8');
-const backend = workflow.match(/^  backend:\n([\s\S]*)$/m)?.[1];
+const backend = workflow.match(/^  backend:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n|(?![\s\S]))/m)?.[1];
 
 test('backend diagnostics is explicitly selected without changing existing desktop choices', () => {
   assert.ok(backend);
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /options: \[all, win32, backend\]/);
-  assert.match(workflow, /preflight:[\s\S]*if: inputs\.platform != 'backend'/);
+  assert.match(workflow, /options: \[all, win32, backend, native-e2e\]/);
+  assert.match(workflow, /preflight:[\s\S]*if: inputs\.platform == 'all' \|\| inputs\.platform == 'win32'/);
   assert.match(backend, /if: inputs\.platform == 'backend'/);
   assert.match(backend, /runs-on: ubuntu-24\.04/);
   assert.match(backend, /timeout-minutes: 120/);

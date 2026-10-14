@@ -22,7 +22,7 @@ const fail = code => { throw Error(code); };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 export function partsFor(bucket) {
-  if (bucket === 'validate-linux-x64') return ['native-debug', 'gateway-debug'];
+  if (bucket === 'validate-linux-x64' || bucket === 'validate-darwin-arm64') return ['native-debug', 'gateway-debug'];
   if (bucket === 'gateway-linux-x64') return ['gateway-release'];
   if (/^desktop-(?:darwin-arm64|linux-x64|win32-x64)$/.test(bucket)) return ['native-release', 'desktop-debug', 'desktop-release'];
   fail('PRIVATE_CACHE_BUCKET_INVALID');

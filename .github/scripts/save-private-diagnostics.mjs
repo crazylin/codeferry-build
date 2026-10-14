@@ -11,6 +11,7 @@ export const diagnosticTasks = Object.freeze([
   'native-embedding', 'native-drain', 'gateway-contracts', 'gateway-worker',
   'tauri-types', 'tauri-frontend-types', 'tauri-frontend-build', 'tauri-contracts',
   'tauri-provider-guard', 'tauri-native-browser', 'tauri-native-runner',
+  'native-fixtures', 'native-gateway-acceptance',
   'gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive',
 ]);
 const MAX_TAIL = 256 * 1024;

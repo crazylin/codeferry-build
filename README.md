@@ -57,6 +57,22 @@ gh workflow run desktop-diagnostics.yml --repo crazylin/codeferry-build \
 
 This lane owns fresh digest-pinned PostgreSQL and Redis containers with loopback fixture URLs. PostgreSQL uses the explicitly disposable `codeferry_test` database; Redis uses database 0 on the job's fresh service. It checks the source identity, reproduces the upstream patch, builds TypeScript, runs source contracts and invokes the source's bounded backend acceptance helper. The helper must reject absent fixture configuration, nonexecuted database tests and missing required named results. Raw diagnostics and Rust dependency caches remain in private source drafts. The job has a 120-minute budget; it receives no product signing or publisher keys and never runs release or server replacement jobs. Passing it is actual disposable-service evidence, not validation of production data, a deployed server or provider OAuth.
 
+## Mac shared Runner Gateway acceptance without publication
+
+Select `platform=native-e2e` on the same feature branch to run the Mac ARM acceptance alone:
+
+```sh
+gh workflow run desktop-diagnostics.yml --repo crazylin/codeferry-build \
+  --ref codex/backend-preflight-2026-10-14 \
+  -f source_commit=<exact-40-character-source-SHA> -f platform=native-e2e
+```
+
+The job checks the exact private source revision and ARM architecture, installs locked Node dependencies, reproduces the native patch, builds the verified release Runner and real embedded Gateway, then calls `source/scripts/native-gateway-acceptance.mjs`. That source helper compiles the test-only controller for the production Rust `RunnerSupervisor`, starts an isolated PostgreSQL fixture, and requires the real Gateway integration suite to execute. The suite owns its temporary Redis and embedded native Server. Test accounts and private Runner credentials belong to this isolated run; production environment files, signing and publication credentials are absent. Two projects must share one account/device Runner. Closed temporary links are checked as disabled.
+
+Fixture dependencies are fixed at PostgreSQL **16.15** and Redis **8.10.2**. The fixture preparation helper reuses installed tools only when every required binary reports the exact version. Otherwise it builds the official [PostgreSQL archive](https://ftp.postgresql.org/pub/source/v16.15/postgresql-16.15.tar.bz2) and [Redis archive](https://download.redis.io/releases/redis-8.10.2.tar.gz) after checking their fixed SHA-256 values. It installs only beneath the job's private temporary directory, with cleared credential and compiler override variables, and never starts system/Homebrew services. The identity record distinguishes exact installed versions from verified archive builds; installed binaries are not claimed to be byte-identical to the archive build.
+
+Native/desktop and Mac Gateway debug dependency caches remain separate private immutable drafts. They retain their existing exact source, lockfile, platform, toolchain, image and profile checks. Raw compilation and acceptance diagnostics use the private bounded collector. The `all` and `win32` choices keep their existing desktop behavior. This 120-minute lane produces no signed installer, product ZIP, deployment or release; it does not certify real provider OAuth, official account login, reboot behavior or other platforms.
+
 Local workflow contracts:
 
 ```sh

@@ -9,11 +9,11 @@ on:
         type: string
 
       platform:
-        description: Desktop platform or backend services to diagnose without publishing
+        description: Desktop platform or isolated runtime services to diagnose without publishing
         required: true
         default: all
         type: choice
-        options: [all, win32, backend]
+        options: [all, win32, backend, native-e2e]
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ env:
 jobs:
   preflight:
     name: Compile and diagnose ${{ matrix.platform }} ${{ matrix.arch }}
-    if: inputs.platform != 'backend'
+    if: inputs.platform == 'all' || inputs.platform == 'win32'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -208,3 +208,106 @@ jobs:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
           CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
         run: node .github/scripts/private-cache.mjs save validate-linux-x64
+
+  native-e2e:
+    name: macOS shared Runner through real Gateway and isolated services
+    if: inputs.platform == 'native-e2e'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ inputs.source_commit }}
+      RUSTUP_TOOLCHAIN: '1.96.0'
+    # The source acceptance wrapper owns temporary loopback PostgreSQL/Redis,
+    # private test credentials and the production shared Runner supervisor.
+    steps:
+      - name: Validate exact native E2E source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'SOURCE_COMMIT_MUST_BE_EXACT_SHA'; exit 1; }
+          git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ inputs.source_commit }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - name: Verify exact native E2E checkout and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(uname -m)" = arm64
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
+        with: {toolchain: '1.96.0', components: rustfmt}
+      - name: Validate isolated native E2E workflow contracts
+        run: node --test .github/scripts/tests/native-gateway-preflight.test.mjs
+      - name: Install locked source dependencies
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs root-dependencies npm ci
+      - name: Install locked frontend dependencies
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-dependencies npm ci
+      - name: Reproduce reviewed native source
+        run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
+      - name: Restore private native and desktop Rust dependencies
+        continue-on-error: true
+        timeout-minutes: 15
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore desktop-darwin-arm64
+      - name: Restore private macOS Gateway validation dependencies
+        continue-on-error: true
+        timeout-minutes: 15
+        env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
+        run: node .github/scripts/private-cache.mjs restore validate-darwin-arm64
+      - name: Build and verify the exact native runtime
+        working-directory: source
+        env: {CODEFERRY_NATIVE_PROFILE: 'release'}
+        run: node ../.github/scripts/ci-task.mjs native-runtime node scripts/native-build.mjs
+      - name: Build frontend assets required by the native client controller
+        working-directory: source/desktop-tauri
+        run: node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
+      - name: Compile the real embedded Gateway with locked dependencies
+        working-directory: source
+        run: node ../.github/scripts/ci-task.mjs gateway-build cargo build --locked --manifest-path gateway-rs/Cargo.toml
+      - name: Prepare exact PostgreSQL and Redis fixture binaries privately
+        run: node .github/scripts/ci-task.mjs native-fixtures node .github/scripts/prepare-native-e2e-fixtures.mjs
+      - name: Require the complete shared Runner Gateway acceptance to execute
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/codeferry-native-fixtures/bin:$PATH"
+          node ../.github/scripts/ci-task.mjs native-gateway-acceptance node scripts/native-gateway-acceptance.mjs
+      - name: Preserve failed native E2E diagnostics privately
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_DIAGNOSTIC_ROLE: darwin-arm64
+        run: node .github/scripts/save-private-diagnostics.mjs
+      - name: Save reusable native and desktop dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save desktop-darwin-arm64
+      - name: Save reusable macOS Gateway validation dependencies privately
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          CODEFERRY_CACHE_COMPLETE: ${{ job.status == 'success' }}
+        run: node .github/scripts/private-cache.mjs save validate-darwin-arm64

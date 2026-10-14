@@ -46,6 +46,7 @@ test('cache keys bind exact locks native patch toolchain OS architecture role im
   await assert.rejects(cacheKey({ ...identity, rustc: 'rustc 1.95.0' }), /IDENTITY_INVALID/);
   await assert.rejects(cacheKey({ ...identity, arch: 'arm64' }), /IDENTITY_INVALID/);
   assert.deepEqual(partsFor('desktop-darwin-arm64'), ['native-release', 'desktop-debug', 'desktop-release']);
+  assert.deepEqual(partsFor('validate-darwin-arm64'), ['native-debug', 'gateway-debug']);
   assert.throws(() => partsFor('../escape'), /BUCKET_INVALID/);
 }));
 test('manifest release assets and archive sizes are bounded and exact', () => {
@@ -58,6 +59,18 @@ test('manifest release assets and archive sizes are bounded and exact', () => {
   for (const edit of [{ draft: false }, { assets: [...release.assets, { name: 'signing.key', size: 1 }] }, { assets: [{ name: 'cargo-cache.tar.gz', size: MAX_ARCHIVE + 1 }, release.assets[1]] }])
     assert.throws(() => validateRelease({ ...release, ...edit }, release.tag_name), /RELEASE_INVALID/);
 });
+test('Mac Gateway validation cache is bound to Mac ARM and independent Gateway inputs', async () => fixture(async root => {
+  await inputs(root);
+  const identity = { source: root, bucket: 'validate-darwin-arm64', platform: 'darwin', arch: 'arm64',
+    part: 'gateway-debug', rustc: 'rustc 1.96.0\nhost: aarch64-apple-darwin', imageOS: 'macos15', imageVersion: '20260907' };
+  const first = await cacheKey(identity);
+  await writeFile(join(root, 'desktop-tauri/src-tauri/Cargo.lock'), 'unrelated desktop inputs');
+  assert.equal(await cacheKey(identity), first);
+  await writeFile(join(root, 'gateway-rs/Cargo.lock'), 'updated Gateway dependency');
+  assert.notEqual(await cacheKey(identity), first);
+  await assert.rejects(cacheKey({ ...identity, platform: 'linux', arch: 'x64' }), /IDENTITY_INVALID/);
+  assert.throws(() => partsFor('validate-darwin-x64'), /BUCKET_INVALID/);
+}));
 test('private immutable compiled cache roundtrip excludes bundles tests incremental and signing outputs', async () => fixture(async root => {
   const source = join(root, 'source'), temporary = join(root, 'temporary'); await mkdir(source); await mkdir(temporary); await buildTarget(source);
   const transport = fakeTransport(); assert.equal(await savePart({ source, temporary, bucket, key, part, sourceSha, transport }), true);
