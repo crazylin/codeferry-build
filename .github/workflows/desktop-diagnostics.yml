@@ -70,11 +70,15 @@ jobs:
         run: node --test .github/scripts/tests/windows-diagnostics.test.mjs .github/scripts/tests/private-diagnostics.test.mjs
       - uses: dtolnay/rust-toolchain@3db9de313aa3e84732d075f6fd8938cc0d6d4b58
         with: {toolchain: '1.96.0', components: rustfmt}
-      - name: Prepare reviewed native dependency without building Runner
+      - name: Prepare and reproduce reviewed native source
         run: node .github/scripts/ci-task.mjs native-source node .github/scripts/prepare-source.mjs
       - name: Restore private desktop Rust dependencies
         env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
         run: node .github/scripts/private-cache.mjs restore desktop-${{ matrix.platform }}-${{ matrix.arch }}
+      - name: Build and verify the exact native Runner without packaging
+        working-directory: source
+        env: {CODEFERRY_NATIVE_PROFILE: 'release'}
+        run: node ../.github/scripts/ci-task.mjs native-runtime node scripts/native-build.mjs
       - name: Install Linux native WebView build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libsecret-1-dev
@@ -90,6 +94,8 @@ jobs:
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run
           node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Exercise the rebuilt shared Runner and require actual tests to execute
+        run: node .github/scripts/ci-task.mjs tauri-native-runner node .github/scripts/native-runner-acceptance.mjs
       - name: Test macOS native browser isolation and management IPC
         if: runner.os == 'macOS'
         working-directory: source/desktop-tauri

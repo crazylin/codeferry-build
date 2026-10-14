@@ -17,7 +17,7 @@ test('private diagnostic collection excludes all signing and publication tasks',
     await writeFile(join(directory, 'arbitrary.log'), 'not allowlisted');
     assert.deepEqual(await collectDiagnostics(directory, {}), [{ task: 'tauri-contracts', truncated: false, tail: 'compiler fixture' }]);
     assert.ok(!diagnosticTasks.some(task => /bundle|finalize|publish/.test(task)));
-    for (const task of ['gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive', 'native-format', 'tauri-frontend-types']) assert.ok(diagnosticTasks.includes(task));
+    for (const task of ['gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive', 'native-format', 'native-runtime', 'tauri-frontend-types', 'tauri-native-runner']) assert.ok(diagnosticTasks.includes(task));
     assert.ok(!diagnosticTasks.includes('collect-tauri'));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
@@ -25,6 +25,17 @@ test('diagnostics redact scoped environment secrets and known tokens', () => {
   const token = 'ghp_' + 'a'.repeat(30), publisher = 'cfr_publish_' + 'b'.repeat(25);
   const output = redactDiagnostics(`fixture ${token} ${publisher} synthetic-password-value`, { GH_TOKEN: token, DB_PASSWORD: 'synthetic-password-value' });
   assert.equal(output, 'fixture [REDACTED] [REDACTED] [REDACTED]');
+});
+test('actual Runner acceptance diagnostics are retained privately with credential redaction', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'private-runner-diagnostics-'));
+  try {
+    await writeFile(join(directory, 'tauri-native-runner.log'), 'native fixture failed\nAuthorization: Bearer SUPER_PRIVATE_RUNNER_TOKEN\n');
+    const records = await collectDiagnostics(directory, {});
+    assert.equal(records.length, 1);
+    assert.equal(records[0].task, 'tauri-native-runner');
+    assert.ok(records[0].tail.includes('native fixture failed'));
+    assert.ok(!records[0].tail.includes('SUPER_PRIVATE_RUNNER_TOKEN'));
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 test('private diagnostics retain only a bounded tail for each known task', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'private-diagnostics-test-'));
