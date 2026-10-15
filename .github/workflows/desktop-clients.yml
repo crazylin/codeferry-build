@@ -22,7 +22,7 @@ on:
         required: true
         type: choice
         options: [all, gateway, desktop]
-        default: gateway
+        default: all
   push:
     branches: [master]
 
@@ -457,6 +457,7 @@ jobs:
       - name: Verify complete release set and publish only when requested
         env:
           CODEFERRY_PUBLISH_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.publish_releases) && secrets.CODEFERRY_PUBLISH_KEY || '' }}
+          GATEWAY_HEALTH_RETRIES: '30'
         run: node .github/scripts/publish-server.mjs
       - name: Finalize private build release
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_releases }}

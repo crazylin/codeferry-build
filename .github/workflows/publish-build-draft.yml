@@ -1,0 +1,100 @@
+name: Publish build draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_tag:
+        description: Exact private draft build tag to publish (e.g. build-38675262780-1)
+        required: true
+        type: string
+      deploy_gateway:
+        description: Deploy the verified gateway before desktop publication
+        required: true
+        type: boolean
+        default: false
+      release_scope:
+        description: Publish complete Tauri clients and gateway, or only desktop, or only gateway
+        required: true
+        type: choice
+        options: [all, desktop, gateway]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeferry-release-publication
+  cancel-in-progress: false
+
+jobs:
+  publish-draft:
+    name: Publish verified build draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Validate build tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.build_tag }}"
+          if ! [[ "$TAG" =~ ^build-[0-9]+-[0-9]+$ ]]; then
+            echo "INVALID_BUILD_TAG_FORMAT: $TAG"
+            exit 1
+          fi
+          echo "ASSET_DIR=$RUNNER_TEMP/release-assets" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Download verified build assets
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: |
+          mkdir -p "$ASSET_DIR"
+          gh release download "${{ inputs.build_tag }}" --repo crazylin/codeferry --dir "$ASSET_DIR"
+      - name: Resolve source revision from verified assets
+        shell: bash
+        run: |
+          node -e '
+          import { readdir, readFile } from "node:fs/promises";
+          import { appendFile } from "node:fs/promises";
+          import { join } from "node:path";
+          const dir = process.env.ASSET_DIR;
+          const files = await readdir(dir);
+          const metaFiles = files.filter(f => f.endsWith(".metadata.json"));
+          if (metaFiles.length === 0) throw new Error("NO_METADATA_FILES_FOUND");
+          let sha = null;
+          for (const m of metaFiles) {
+            const data = JSON.parse(await readFile(join(dir, m), "utf8"));
+            if (!/^[a-f0-9]{40}$/.test(data.sourceCommit ?? "")) throw new Error("INVALID_METADATA_SOURCE_COMMIT");
+            if (sha && sha !== data.sourceCommit) throw new Error("SOURCE_COMMIT_MISMATCH_ACROSS_METADATA");
+            sha = data.sourceCommit;
+          }
+          console.log(`Resolved immutable source revision: ${sha}`);
+          await appendFile(process.env.GITHUB_ENV, `SOURCE_SHA=${sha}\n`);
+          '
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: crazylin/codeferry
+          ref: ${{ env.SOURCE_SHA }}
+          token: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/desktop-tauri/package-lock.json
+      - name: Verify complete release set and publish to production
+        env:
+          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+          DEPLOY_GATEWAY: ${{ inputs.deploy_gateway }}
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
+          GATEWAY_HEALTH_RETRIES: '30'
+          CLIENT_ENGINE: tauri
+        run: node .github/scripts/publish-server.mjs
+      - name: Finalize private build release
+        env:
+          GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
+        run: gh release edit "${{ inputs.build_tag }}" --repo crazylin/codeferry --draft=false

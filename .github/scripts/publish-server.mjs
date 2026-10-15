@@ -22,28 +22,36 @@ export function verificationOnly(value) {
   if(value==='true') return true;
   throw Error('RELEASE_VERIFY_ONLY_INVALID');
 }
-export async function requireReadyGateway(version,{origin=publicationOrigin,transport=fetch,allowLoopback=false}={}) {
-  try {
-    const base=new URL(origin);
-    // Production publication has one fixed authority, shared with publishArtifact.
-    // A literal loopback HTTP authority is admitted only by explicit test input.
-    if(base.origin!==origin||base.username||base.password||!(origin===publicationOrigin||
-      (allowLoopback&&base.protocol==='http:'&&base.hostname==='127.0.0.1'))||
-      !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version??'')) throw Error();
-    const target=new URL('/healthz',base);
-    const response=await transport(target,{method:'GET',redirect:'error',signal:AbortSignal.timeout(5000)});
-    if(!response.ok||response.redirected||(response.url&&response.url!==target.href)||!response.body) throw Error();
-    const chunks=[];let bytes=0;const reader=response.body.getReader();
+export async function requireReadyGateway(version,{origin=publicationOrigin,transport=fetch,allowLoopback=false,retries=0,retryDelayMs=2000,sleep=ms=>new Promise(r=>setTimeout(r,ms))}={}) {
+  const base=new URL(origin);
+  // Production publication has one fixed authority, shared with publishArtifact.
+  // A literal loopback HTTP authority is admitted only by explicit test input.
+  if(base.origin!==origin||base.username||base.password||!(origin===publicationOrigin||
+    (allowLoopback&&base.protocol==='http:'&&base.hostname==='127.0.0.1'))||
+    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version??'')) {
+    throw Object.assign(Error('GATEWAY_RELEASE_NOT_READY'),{code:'GATEWAY_RELEASE_NOT_READY'});
+  }
+  const target=new URL('/healthz',base);
+  for(let attempt=0;attempt<=retries;attempt++) {
     try {
-      for(;;) {
-        const part=await reader.read();if(part.done) break;
-        bytes+=part.value.byteLength;if(bytes>16*1024) {await reader.cancel();throw Error();}
-        chunks.push(Buffer.from(part.value));
-      }
-    } finally {reader.releaseLock();}
-    const health=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
-    if(health?.product!=='CodeFerry'||health.status!=='ok'||health.engine!=='gateway-rs'||health.version!==version) throw Error();
-  } catch {throw Object.assign(Error('GATEWAY_RELEASE_NOT_READY'),{code:'GATEWAY_RELEASE_NOT_READY'});}
+      const response=await transport(target,{method:'GET',redirect:'error',signal:AbortSignal.timeout(5000)});
+      if(!response.ok||response.redirected||(response.url&&response.url!==target.href)||!response.body) throw Error();
+      const chunks=[];let bytes=0;const reader=response.body.getReader();
+      try {
+        for(;;) {
+          const part=await reader.read();if(part.done) break;
+          bytes+=part.value.byteLength;if(bytes>16*1024) {await reader.cancel();throw Error();}
+          chunks.push(Buffer.from(part.value));
+        }
+      } finally {reader.releaseLock();}
+      const health=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
+      if(health?.product!=='CodeFerry'||health.status!=='ok'||health.engine!=='gateway-rs'||health.version!==version) throw Error();
+      return;
+    } catch {
+      if(attempt<retries) { await sleep(retryDelayMs); continue; }
+      throw Object.assign(Error('GATEWAY_RELEASE_NOT_READY'),{code:'GATEWAY_RELEASE_NOT_READY'});
+    }
+  }
 }
 export async function runPublication({environment=process.env,sourceRoot=resolve('source'),assetDirectory=environment.ASSET_DIR,
   loadPublisher=source=>import(pathToFileURL(join(source,'scripts/publish-release.mjs'))),healthTransport=fetch,log=value=>console.log(value)}={}) {
@@ -74,7 +82,8 @@ export async function runPublication({environment=process.env,sourceRoot=resolve
   let desktopReady=false;
   for(const row of records) {
     if(row.component==='desktop'&&!desktopReady) {
-      await requireReadyGateway(gatewayVersion,{origin:publicationOrigin,transport:healthTransport});desktopReady=true;
+      const retries=environment.GATEWAY_HEALTH_RETRIES?parseInt(environment.GATEWAY_HEALTH_RETRIES,10):0;
+      await requireReadyGateway(gatewayVersion,{origin:publicationOrigin,transport:healthTransport,retries});desktopReady=true;
     }
     await publishArtifact({file:join(directory,row.filename),metadata:row,key:environment.CODEFERRY_PUBLISH_KEY,origin:publicationOrigin,
       deploy:row.component==='gateway'&&environment.DEPLOY_GATEWAY!=='false',waitDeployment:true});
