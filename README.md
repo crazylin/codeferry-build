@@ -13,10 +13,24 @@ Manual inputs:
 | `source_commit` | private main resolved once | Optional exact lowercase 40-character commit; all jobs use that SHA |
 | `release_scope` | `gateway` | `all` builds the three complete Tauri clients and gateway; `gateway` validates contracts but publishes only the gateway |
 | `deploy_gateway` | `true` | Submit deployment once after verified upload, then wait for its terminal status |
+| `publish_releases` | `true` | `false` builds and verifies the complete artifact set but leaves it only in a private draft; must use `deploy_gateway=false` |
+
+The shared Runner release candidate can be built without changing the public updater or production server:
+
+```sh
+gh workflow run desktop-clients.yml --repo crazylin/codeferry-build \
+  --ref codex/release-shared-runner-0-2-44 \
+  -f source_commit=<exact-40-character-source-SHA> \
+  -f release_scope=all -f publish_releases=false -f deploy_gateway=false
+```
+
+This path still executes the full contracts, real database tests, platform builds, actual Runner gates, packaging and updater signature/hash checks. It does not import the publisher or receive the server publication key, and does not finalize the draft. A shared-runtime client must not enter the stable feed while its compatible Gateway is absent. Gateway 0.3.8 changes the runtime schema and invalidates old Runner credentials; the existing automatic worker deliberately refuses an unreviewed schema transition. Its mandatory backup behavior also requires a separate deployment decision when the source contract forbids automatic backups.
+
+For publication, the gateway record is handled first and any requested deployment must finish before desktop assets are published. Before the first desktop mutation the publisher checks the same official origin's `/healthz` for the exact Gateway version, product, engine and ready status. This bounded read sends no credentials and never follows redirects. A mismatched Gateway blocks desktop publication; a health check alone does not establish schema migration or full project interoperability. Only-verification builds make no health or publication request.
 
 The first workflow push uses `all`. Gateway-only dispatch is useful after that initial release. New gateway releases require increasing Cargo version; delivered desktop updates require increasing desktop version. Existing versioned artifacts are immutable. On a failed or unknown upload/deploy, inspect the existing release and deployment first. A rebuild with different bytes requires a new version; there is no overwrite or automatic effectful replay.
 
-New desktop releases use Tauri 2/Rust/system WebViews only. Mac arm64 builds produce dmg and signed app.tar.gz, Windows x64 produces signed NSIS exe, and Linux x64 produces deb and signed AppImage. Node is a build dependency, not a shipped runtime. No Electron/runtime/slim build or legacy migration path is published. Official updater signatures are independently streamed and verified together with their signed version at collection and final publication. The five client artifacts and one gateway artifact must form the exact expected immutable set. Signing secrets are absent from the gateway job and server publisher. Platform build success is distinct from real website login and actual installer/update acceptance.
+New desktop releases use Tauri 2/Rust/system WebViews only. Mac arm64 builds produce dmg and an updater-signed app.tar.gz, Windows x64 produces an updater-signed NSIS exe, and Linux x64 produces independently updater-signed deb and AppImage files. The current Mac seal is ad-hoc; the workflow does not perform Apple Developer ID signing/notarization or Windows Authenticode signing. Node is a build dependency, not a shipped runtime. No Electron/runtime/slim build or legacy migration path is published. Official updater signatures are independently streamed and verified together with their signed version at collection and final publication. The five client artifacts and one gateway artifact must form the exact expected immutable set. Signing secrets are absent from the gateway job and server publisher. Platform build success is distinct from real website login and actual installer/update acceptance.
 
 The validation gate installs only the current `desktop-tauri` frontend dependencies and runs its typecheck and production build. The shared React renderer resolves types and runtime from that dependency tree; a clean checkout needs no retired Electron dependency tree or runtime manifests. Each independent platform checkout builds its own frontend assets before testing the Rust client with its actual shipped Runner and packaging. macOS packages the app first and creates its sealed updater and DMG without Finder automation.
 

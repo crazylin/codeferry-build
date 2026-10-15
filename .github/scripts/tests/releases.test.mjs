@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir, symlink, realpath } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expectedMetadata, artifactName, writeMetadata, verifyTauriSignature } from '../assets.mjs';
-import { requireProductionEngine, validateReleaseSet } from '../publish-server.mjs';
+import { requireProductionEngine, validateReleaseSet, verificationOnly, runPublication, requireReadyGateway, publicationOrigin } from '../publish-server.mjs';
 import { resolveGatewayBinary } from '../gateway-image.mjs';
 const sha='a'.repeat(40), hash='b'.repeat(64);
 const options={sourceSha:sha,desktopVersion:'0.2.0',gatewayVersion:'0.3.0'};
@@ -17,6 +17,25 @@ function records() {
  return rows.map(row=>({...row,sha256:hash,size:123}));
 }
 async function fixture(body) {const root=await mkdtemp(join(tmpdir(),'codeferry-workflow-'));try{return await body(root);}finally{await rm(root,{recursive:true,force:true});}}
+async function publicationFixture(body) {
+ return fixture(async root=>{
+  const sourceRoot=join(root,'source'),assetDirectory=join(root,'assets');
+  await mkdir(join(sourceRoot,'desktop-tauri'),{recursive:true});await mkdir(join(sourceRoot,'gateway-rs'));await mkdir(assetDirectory);
+  await writeFile(join(sourceRoot,'desktop-tauri/package.json'),JSON.stringify({version:options.desktopVersion}));
+  await writeFile(join(sourceRoot,'desktop-tauri/updater.pub'),signedFixture.key);
+  await writeFile(join(sourceRoot,'gateway-rs/Cargo.toml'),`[package]\nversion = "${options.gatewayVersion}"\n`);
+  for(const row of records()) {
+   const file=join(assetDirectory,row.filename);await writeFile(file,signedFixture.bytes);
+   const {sha256:ignoredHash,size:ignoredSize,...metadata}=row;await writeMetadata(file,metadata);
+  }
+  const output=[],calls=[],healthCalls=[],events=[];let loads=0;
+  const environment={SOURCE_SHA:sha,RELEASE_SCOPE:'all',VERIFY_ONLY:'true',DEPLOY_GATEWAY:'false'};
+  const run=overrides=>runPublication({sourceRoot,assetDirectory,environment,log:value=>output.push(value),
+   loadPublisher:async()=>{loads++;return {publishArtifact:async call=>{calls.push(call);events.push('publish_'+call.metadata.component);}};},
+   healthTransport:async(...args)=>{healthCalls.push(args);events.push('health');return Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion});},...overrides});
+  await body({sourceRoot,assetDirectory,environment,output,calls,healthCalls,events,run,get loads(){return loads;}});
+ });
+}
 test('complete signed Tauri set requires five installers and one embedded gateway',()=>{
  const rows=records();assert.equal(rows.length,6);validateReleaseSet(rows,options);
  assert.throws(()=>validateReleaseSet(rows.slice(1),options),/INCOMPLETE/);
@@ -87,4 +106,114 @@ test('desktop-only CI release is gated on signed desktop matrix and cannot build
  const desktop=records().filter(row=>row.component==='desktop');
  validateReleaseSet(desktop,{...options,scope:'desktop'});
  assert.throws(()=>validateReleaseSet(desktop.filter(row=>row.format!=='tar.gz'),{...options,scope:'desktop'}),/INCOMPLETE/);
+});
+
+test('verification-only flag accepts exact environment booleans and defaults to publication',()=>{
+ assert.equal(verificationOnly(undefined),false);assert.equal(verificationOnly('false'),false);assert.equal(verificationOnly('true'),true);
+ for(const value of ['',null,true,false,'TRUE','1','0',' true','false ']) assert.throws(()=>verificationOnly(value),/RELEASE_VERIFY_ONLY_INVALID/);
+});
+
+test('verification-only executes all six real hashes and four version-bound signatures without network publisher or key',async()=>publicationFixture(async f=>{
+ await f.run();assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.healthCalls,[]);assert.deepEqual(f.events,[]);assert.deepEqual(f.output,['RELEASE_SET_VERIFIED']);
+ // There is deliberately no scripts/publish-release.mjs in the source fixture.
+ // Exercise the default dynamic import boundary as well as the observed loader.
+ await f.run({loadPublisher:undefined});assert.equal(f.loads,0);assert.deepEqual(f.output,['RELEASE_SET_VERIFIED','RELEASE_SET_VERIFIED']);
+}));
+
+test('verification-only rejects any incomplete changed unsigned or mismatched set before publisher access',async()=>{
+ const failures=[
+  async f=>{const row=records()[0];await rm(join(f.assetDirectory,row.filename));await rm(join(f.assetDirectory,row.filename+'.metadata.json'));},
+  async f=>writeFile(join(f.assetDirectory,records()[0].filename),'changed artifact'),
+  async f=>{const file=join(f.assetDirectory,records()[1].filename+'.metadata.json');const row=JSON.parse(await readFile(file,'utf8'));row.updaterSignature=signedFixture.signature.slice(1);await writeFile(file,JSON.stringify(row));},
+  async f=>{const file=join(f.assetDirectory,records()[0].filename+'.metadata.json');const row=JSON.parse(await readFile(file,'utf8'));row.sourceCommit='c'.repeat(40);await writeFile(file,JSON.stringify(row));},
+  async f=>{const file=join(f.assetDirectory,records()[1].filename+'.metadata.json');const row=JSON.parse(await readFile(file,'utf8'));delete row.updaterSignature;await writeFile(file,JSON.stringify(row));},
+  async f=>writeFile(join(f.assetDirectory,'unexpected.txt'),'extra'),
+ ];
+ for(const mutate of failures) await publicationFixture(async f=>{await mutate(f);await assert.rejects(f.run());assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.output,[]);});
+});
+
+test('verification-only rejects deployment requests before any publisher access',async()=>publicationFixture(async f=>{
+ for(const deploy of ['true',undefined,'FALSE','']) {
+  f.environment.DEPLOY_GATEWAY=deploy;
+  await assert.rejects(f.run(),/RELEASE_VERIFY_ONLY_CANNOT_DEPLOY/);
+ }
+ assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.output,[]);
+}));
+
+test('default publication preserves the full verified release set and deploys only gateway when enabled',async()=>publicationFixture(async f=>{
+ delete f.environment.VERIFY_ONLY;f.environment.CODEFERRY_PUBLISH_KEY='fixture-not-a-real-publish-key';f.environment.DEPLOY_GATEWAY='true';
+ await f.run();assert.equal(f.loads,1);assert.equal(f.calls.length,6);
+ assert.deepEqual(f.calls.map(call=>call.metadata.component),['gateway','desktop','desktop','desktop','desktop','desktop']);
+ assert.deepEqual(f.calls.map(call=>call.deploy),[true,false,false,false,false,false]);
+ assert.deepEqual(f.events,['publish_gateway','health','publish_desktop','publish_desktop','publish_desktop','publish_desktop','publish_desktop']);
+ assert.ok(f.calls.every(call=>call.origin===publicationOrigin));assert.equal(f.healthCalls.length,1);assert.equal(String(f.healthCalls[0][0]),publicationOrigin+'/healthz');
+ assert.ok(f.calls.every(call=>call.waitDeployment===true));assert.equal(f.output.at(-1),'SERVER_RELEASE_SET_COMPLETE');
+ assert.ok(!f.output.includes('RELEASE_SET_VERIFIED'));
+}));
+
+test('explicit publish without deployment still publishes gateway and requires a publisher key',async()=>publicationFixture(async f=>{
+ f.environment.VERIFY_ONLY='false';await assert.rejects(f.run(),/RELEASE_PUBLISH_CONFIGURATION_INVALID/);assert.equal(f.loads,0);
+ f.environment.CODEFERRY_PUBLISH_KEY='fixture-not-a-real-publish-key';await f.run();assert.equal(f.calls.length,6);assert.ok(f.calls.every(call=>call.deploy===false));
+}));
+
+test('old unavailable malformed or redirected Gateway blocks every desktop publication after publishing gateway',async()=>{
+ const replies=[
+  ()=>Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:'0.2.99'}),
+  ()=>new Response('temporarily unavailable',{status:503}),
+  ()=>new Response('invalid JSON'),
+  ()=>Object.defineProperty(Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion}),'redirected',{value:true}),
+  ()=>{throw Error('untrusted private network diagnostic');},
+ ];
+ for(const reply of replies) await publicationFixture(async f=>{
+  f.environment.VERIFY_ONLY='false';f.environment.CODEFERRY_PUBLISH_KEY='fixture-not-a-real-publish-key';
+  await assert.rejects(f.run({healthTransport:async()=>reply()}),{code:'GATEWAY_RELEASE_NOT_READY',message:'GATEWAY_RELEASE_NOT_READY'});
+  assert.equal(f.calls.length,1);assert.equal(f.calls[0].metadata.component,'gateway');assert.deepEqual(f.output,['RELEASE_COMPONENT_PUBLISHED_GATEWAY']);
+ });
+});
+
+test('gateway deployment must complete before the health check or any desktop publication',async()=>publicationFixture(async f=>{
+ f.environment.VERIFY_ONLY='false';f.environment.CODEFERRY_PUBLISH_KEY='fixture-not-a-real-publish-key';f.environment.DEPLOY_GATEWAY='true';
+ const events=[];let finishDeployment;const deployed=new Promise(resolve=>{finishDeployment=resolve;});
+ const execution=f.run({loadPublisher:async()=>({publishArtifact:async call=>{events.push('start_'+call.metadata.component);if(call.metadata.component==='gateway'){assert.equal(call.deploy,true);assert.equal(call.waitDeployment,true);await deployed;events.push('gateway_deployed');}}}),
+  healthTransport:async()=>{events.push('health');return Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion});}});
+ // Wait for the first effectful call, without releasing its deployment promise.
+ for(let attempt=0;!events.length&&attempt<100;attempt++) await new Promise(resolve=>setTimeout(resolve,1));
+ assert.deepEqual(events,['start_gateway']);finishDeployment();await execution;
+ assert.deepEqual(events,['start_gateway','gateway_deployed','health','start_desktop','start_desktop','start_desktop','start_desktop','start_desktop']);
+}));
+
+test('gateway-only publication does not require desktop health and desktop-only requires an already ready gateway',async()=>{
+ for(const scope of ['gateway','desktop']) await publicationFixture(async f=>{
+  for(const row of records().filter(row=>row.component!==(scope==='gateway'?'gateway':'desktop'))) {
+   await rm(join(f.assetDirectory,row.filename));await rm(join(f.assetDirectory,row.filename+'.metadata.json'));
+  }
+  Object.assign(f.environment,{VERIFY_ONLY:'false',RELEASE_SCOPE:scope,CODEFERRY_PUBLISH_KEY:'fixture-not-a-real-publish-key'});
+  await f.run();assert.equal(f.calls.length,scope==='gateway'?1:5);assert.equal(f.healthCalls.length,scope==='gateway'?0:1);
+  assert.deepEqual(f.events,scope==='gateway'?['publish_gateway']:['health','publish_desktop','publish_desktop','publish_desktop','publish_desktop','publish_desktop']);
+ });
+});
+
+test('gateway readiness checks only the fixed HTTPS authority or explicit literal loopback, with no redirects or credentials',async()=>{
+ const calls=[];const transport=async(...args)=>{calls.push(args);return Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion});};
+ await requireReadyGateway(options.gatewayVersion,{transport});assert.equal(String(calls[0][0]),publicationOrigin+'/healthz');
+ assert.equal(calls[0][1].method,'GET');assert.equal(calls[0][1].redirect,'error');assert.ok(calls[0][1].signal instanceof AbortSignal);assert.equal(calls[0][1].headers,undefined);
+ await requireReadyGateway(options.gatewayVersion,{transport,origin:'http://127.0.0.1:39001',allowLoopback:true});
+ for(const origin of ['https://example.com','https://codeferry.link/','http://codeferry.link','http://localhost:39001','http://127.0.0.1:39001','https://user:password@codeferry.link','https://codeferry.link/path','https://codeferry.link?query=true']) {
+  await assert.rejects(requireReadyGateway(options.gatewayVersion,{origin,transport}),{code:'GATEWAY_RELEASE_NOT_READY'});
+ }
+ assert.equal(calls.length,2);
+});
+
+test('gateway readiness requires the exact product status engine version and bounded valid UTF8 JSON',async()=>{
+ const valid={product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion};
+ for(const edit of [{product:'Other'},{status:'starting'},{engine:'node'},{version:'0.3.1'},{version:undefined}]) {
+  await assert.rejects(requireReadyGateway(options.gatewayVersion,{transport:async()=>Response.json({...valid,...edit})}),{code:'GATEWAY_RELEASE_NOT_READY'});
+ }
+ for(const bytes of [' '.repeat(16*1024+1),Buffer.from([0xff,0xfe]),'not JSON','null','[]']) {
+  await assert.rejects(requireReadyGateway(options.gatewayVersion,{transport:async()=>new Response(bytes)}),{code:'GATEWAY_RELEASE_NOT_READY'});
+ }
+ let cancelled=false;
+ const body=new ReadableStream({pull(controller){controller.enqueue(new Uint8Array(16*1024+1));},cancel(){cancelled=true;}});
+ await assert.rejects(requireReadyGateway(options.gatewayVersion,{transport:async()=>new Response(body)}),{code:'GATEWAY_RELEASE_NOT_READY'});assert.equal(cancelled,true);
+ await assert.rejects(requireReadyGateway(options.gatewayVersion,{transport:async()=>({ok:true,redirected:false,url:'https://example.com/healthz',body:new Response('{}').body})}),{code:'GATEWAY_RELEASE_NOT_READY'});
 });

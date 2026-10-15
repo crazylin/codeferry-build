@@ -8,7 +8,12 @@ on:
         required: false
         type: string
       deploy_gateway:
-        description: Deploy the verified gateway after all platforms pass
+        description: Deploy the verified gateway before desktop publication after all platforms pass
+        required: true
+        type: boolean
+        default: true
+      publish_releases:
+        description: Publish verified assets to stable; false keeps only the private build draft
         required: true
         type: boolean
         default: true
@@ -45,8 +50,13 @@ jobs:
         shell: bash
         env:
           REQUESTED_COMMIT: ${{ inputs.source_commit }}
+          VERIFY_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_releases == false }}
+          DEPLOY_GATEWAY: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_gateway }}
         run: |
           set -euo pipefail
+          if [ "$VERIFY_ONLY" = true ] && [ "$DEPLOY_GATEWAY" != false ]; then
+            echo 'VERIFY_ONLY_CANNOT_DEPLOY_GATEWAY'; exit 1
+          fi
           if [ -n "$REQUESTED_COMMIT" ] && ! [[ "$REQUESTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
             echo 'SOURCE_COMMIT_MUST_BE_EXACT_SHA'; exit 1
           fi
@@ -257,7 +267,9 @@ jobs:
           set -euo pipefail
           node ../../.github/scripts/ci-task.mjs tauri-types npm run typecheck
           node ../../.github/scripts/ci-task.mjs tauri-frontend-build npm run build
-          node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked -- --include-ignored
+          node ../../.github/scripts/ci-task.mjs tauri-contracts cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Verify controlled actual shared Runner tests
+        run: node .github/scripts/ci-task.mjs tauri-actual-runner node .github/scripts/native-runner-acceptance.mjs
       - name: Verify Unix provider cleanup with the actual Runner
         if: runner.os != 'Windows'
         run: node .github/scripts/ci-task.mjs tauri-provider-guard python3 source/desktop-tauri/scripts/runner_guard_fixture.py
@@ -410,6 +422,7 @@ jobs:
     env:
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
       DEPLOY_GATEWAY: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_gateway }}
+      VERIFY_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_releases == false }}
       CLIENT_ENGINE: tauri
       RELEASE_SCOPE: ${{ inputs.release_scope || 'all' }}
     steps:
@@ -439,11 +452,12 @@ jobs:
         run: |
           mkdir -p "$ASSET_DIR"
           gh release download "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --repo crazylin/codeferry --dir "$ASSET_DIR"
-      - name: Verify all hashes publish server assets and await gateway deployment
+      - name: Verify complete release set and publish only when requested
         env:
-          CODEFERRY_PUBLISH_KEY: ${{ secrets.CODEFERRY_PUBLISH_KEY }}
+          CODEFERRY_PUBLISH_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.publish_releases) && secrets.CODEFERRY_PUBLISH_KEY || '' }}
         run: node .github/scripts/publish-server.mjs
       - name: Finalize private build release
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_releases }}
         env:
           GH_TOKEN: ${{ secrets.CODEFERRY_SOURCE_TOKEN }}
         run: gh release edit "build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --repo crazylin/codeferry --draft=false

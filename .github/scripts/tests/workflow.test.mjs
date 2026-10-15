@@ -41,6 +41,28 @@ test('each fresh package checkout builds embedded frontend assets before Tauri C
   assert.match(packageJob, /Typecheck build frontend and test complete Rust client\n        shell: bash/);
   assert.match(packageJob, /set -euo pipefail\n          node .*tauri-types/);
 });
+test('desktop release runs ordinary unit tests and controlled actual Runner acceptance separately',()=>{
+ const packageJob=job('package');
+ assert.match(packageJob,/tauri-contracts cargo test --manifest-path src-tauri\/Cargo.toml --locked\n/);
+ assert.doesNotMatch(packageJob,/--include-ignored/);
+ const unit=packageJob.indexOf('tauri-contracts cargo test');
+ const actual=packageJob.indexOf('tauri-actual-runner node .github/scripts/native-runner-acceptance.mjs');
+ const bundle=packageJob.indexOf('tauri-bundle npx tauri build');
+ assert.ok(unit>=0&&actual>unit&&bundle>actual);
+});
+test('private draft verification is explicit, cannot deploy, never finalizes or receives a publisher key',()=>{
+ assert.match(text,/publish_releases:\n        description:[^\n]+\n        required: true\n        type: boolean\n        default: true/);
+ const resolution=job('resolve'),publication=job('publish');
+ assert.match(resolution,/VERIFY_ONLY: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish_releases == false \}\}/);
+ assert.match(resolution,/if \[ "\$VERIFY_ONLY" = true \] && \[ "\$DEPLOY_GATEWAY" != false \]; then\n            echo 'VERIFY_ONLY_CANNOT_DEPLOY_GATEWAY'; exit 1/);
+ assert.match(publication,/VERIFY_ONLY: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish_releases == false \}\}/);
+ assert.match(publication,/CODEFERRY_PUBLISH_KEY: \$\{\{ \(github\.event_name != 'workflow_dispatch' \|\| inputs\.publish_releases\) && secrets\.CODEFERRY_PUBLISH_KEY \|\| '' \}\}/);
+ assert.match(publication,/name: Finalize private build release\n        if: \$\{\{ github\.event_name != 'workflow_dispatch' \|\| inputs\.publish_releases \}\}/);
+ assert.ok(publication.indexOf('node .github/scripts/publish-server.mjs')<publication.indexOf('gh release edit'));
+});
+test('gateway deployment description reflects the desktop readiness gate',()=>{
+ assert.match(text,/description: Deploy the verified gateway before desktop publication after all platforms pass/);
+});
 test('validation builds the Tauri frontend without retired Electron runtime contracts', () => {
   const validation = job('validate');
   assert.match(validation, /working-directory: source\/desktop-tauri/);
