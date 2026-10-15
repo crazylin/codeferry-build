@@ -73,7 +73,7 @@ test('validation builds the Tauri frontend without retired Electron runtime cont
 });
 test('all builds and actual database/native tests precede publisher key access', () => {
   assert.match(job('validate'), /TEST_DATABASE_URL/); assert.match(job('validate'), /TEST_REDIS_URL/);
-  assert.match(job('validate'), /--include-ignored/); assert.match(job('validate'), /release_worker_test\.py/);
+  assert.match(job('validate'), /gateway-contracts node scripts\/backend-acceptance\.mjs/); assert.match(job('validate'), /release_worker_test\.py/);
   assert.match(job('gateway'), /gateway-smoke\.mjs/); assert.match(job('gateway'), /collect-gateway\.mjs/);
   assert.match(job('publish'), /needs: \[resolve, validate, package, gateway\]/);
   assert.equal([...text.matchAll(/secrets\.CODEFERRY_PUBLISH_KEY/g)].length, 1);
@@ -155,10 +155,22 @@ test('fresh contract tests have Tauri dependencies and reproduced native source 
 test('Arena release validates scoring and UI and distributes fingerprint attribution', async () => {
  assert.match(job('validate'), /fingerprint-contracts cargo test --locked --manifest-path crates\/codeferry-fingerprint\/Cargo.toml/);
  assert.match(job('validate'), /tauri-ui npm run test:ui/);
- assert.match(job('validate'), /--include-ignored --test-threads=1/);
+ assert.match(job('validate'), /gateway-contracts cargo test --manifest-path gateway-rs\/Cargo\.toml --locked -- --test-threads=1/);
  const image=await readFile(join(repo,'.github/scripts/gateway-image.mjs'),'utf8');
  assert.ok(image.includes('licenses/lm-detector/LICENSE'));
  assert.ok(image.includes('LIBRARY_MANIFEST.json'));
  const smoke=await readFile(join(repo,'.github/scripts/gateway-smoke.mjs'),'utf8');
  assert.ok(smoke.includes('await verifyFingerprintDistribution'));
+});
+
+test('release backend uses only the disposable fixture names and proves every real-service test ran',()=>{
+ const validation=job('validate');
+ assert.match(validation,/TEST_DATABASE_URL: postgres:\/\/codeferry:fixture-ci-password@127\.0\.0\.1:5432\/codeferry_test\n/);
+ assert.match(validation,/TEST_REDIS_URL: redis:\/\/127\.0\.0\.1:6379\/0\n/);
+ assert.match(validation,/POSTGRES_DB: codeferry_test\n/);
+ assert.match(validation,/--health-cmd "pg_isready -U codeferry -d codeferry_test"/);
+ const unit=validation.indexOf('gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --test-threads=1');
+ const actual=validation.indexOf('gateway-contracts node scripts/backend-acceptance.mjs');
+ assert.ok(unit>=0&&actual>unit);
+ assert.doesNotMatch(validation,/--include-ignored/);
 });

@@ -89,18 +89,18 @@ jobs:
     timeout-minutes: 120
     env:
       SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
-      TEST_DATABASE_URL: postgres://codeferry:fixture-ci-password@127.0.0.1:5432/codeferry
-      TEST_REDIS_URL: redis://127.0.0.1:6379
+      TEST_DATABASE_URL: postgres://codeferry:fixture-ci-password@127.0.0.1:5432/codeferry_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/0
     services:
       postgres:
         image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
         env:
           POSTGRES_USER: codeferry
           POSTGRES_PASSWORD: fixture-ci-password
-          POSTGRES_DB: codeferry
+          POSTGRES_DB: codeferry_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U codeferry -d codeferry"
+          --health-cmd "pg_isready -U codeferry -d codeferry_test"
           --health-interval 5s --health-timeout 5s --health-retries 20
       redis:
         image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
@@ -164,7 +164,9 @@ jobs:
           node ../../../.github/scripts/ci-task.mjs native-drain cargo test --locked -p webcodex --lib server_shutdown
       - name: Test gateway with real isolated PostgreSQL and Redis
         working-directory: source
-        run: node ../.github/scripts/ci-task.mjs gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --include-ignored --test-threads=1
+        run: |
+          node ../.github/scripts/ci-task.mjs gateway-contracts cargo test --manifest-path gateway-rs/Cargo.toml --locked -- --test-threads=1
+          node ../.github/scripts/ci-task.mjs gateway-contracts node scripts/backend-acceptance.mjs
       - name: Test host update worker migration and identity contracts
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs gateway-worker python3 -m unittest discover -s scripts/test -p release_worker_test.py
