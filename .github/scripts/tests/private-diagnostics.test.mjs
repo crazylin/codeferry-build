@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, symlink, link, mkdir, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, symlink, link, mkdir, readdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,17 +26,30 @@ test('diagnostics redact scoped environment secrets and known tokens', () => {
   const output = redactDiagnostics(`fixture ${token} ${publisher} synthetic-password-value`, { GH_TOKEN: token, DB_PASSWORD: 'synthetic-password-value' });
   assert.equal(output, 'fixture [REDACTED] [REDACTED] [REDACTED]');
 });
-test('actual Runner acceptance diagnostics are retained privately with credential redaction', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'private-runner-diagnostics-'));
-  try {
-    await writeFile(join(directory, 'tauri-native-runner.log'), 'native fixture failed\nAuthorization: Bearer SUPER_PRIVATE_RUNNER_TOKEN\n');
-    const records = await collectDiagnostics(directory, {});
-    assert.equal(records.length, 1);
-    assert.equal(records[0].task, 'tauri-native-runner');
-    assert.ok(records[0].tail.includes('native fixture failed'));
-    assert.ok(!records[0].tail.includes('SUPER_PRIVATE_RUNNER_TOKEN'));
-  } finally { await rm(directory, { recursive: true, force: true }); }
+test('desktop workflow tasks retain private diagnostics unless they sign or collect signed artifacts', async () => {
+  const excluded = new Set(['tauri-bundle', 'tauri-macos-finalize', 'sign-debian', 'collect-tauri']);
+  for (const name of ['desktop-clients.yml', 'desktop-diagnostics.yml']) {
+    const workflow = await readFile(new URL('../../workflows/' + name, import.meta.url), 'utf8');
+    const tasks = new Set([...workflow.matchAll(/ci-task\.mjs ([a-z][a-z0-9-]*)\b/g)].map(match => match[1]));
+    assert.ok(tasks.size > 0, name + ' must declare private CI tasks');
+    const missing = [...tasks].filter(task => !excluded.has(task) && !diagnosticTasks.includes(task));
+    assert.deepEqual(missing, [], name + ' has tasks without private diagnostics');
+  }
+  for (const task of excluded) assert.ok(!diagnosticTasks.includes(task), task + ' must stay excluded');
 });
+for (const task of ['tauri-actual-runner', 'tauri-native-runner', 'tauri-provider-guard']) {
+  test(task + ' diagnostics are retained privately with credential redaction', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'private-runner-diagnostics-'));
+    try {
+      await writeFile(join(directory, task + '.log'), 'native fixture failed\nAuthorization: Bearer SUPER_PRIVATE_RUNNER_TOKEN\n');
+      const records = await collectDiagnostics(directory, {});
+      assert.equal(records.length, 1);
+      assert.equal(records[0].task, task);
+      assert.ok(records[0].tail.includes('native fixture failed'));
+      assert.ok(!records[0].tail.includes('SUPER_PRIVATE_RUNNER_TOKEN'));
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+}
 test('private diagnostics retain only a bounded tail for each known task', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'private-diagnostics-test-'));
   try {

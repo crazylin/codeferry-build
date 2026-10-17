@@ -7,10 +7,12 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const diagnosticTasks = Object.freeze([
+  'root-dependencies', 'workspace-dependencies', 'fingerprint-contracts',
   'root-contracts', 'native-source', 'native-runtime', 'native-format', 'native-auth',
   'native-embedding', 'native-drain', 'gateway-contracts', 'gateway-worker',
+  'tauri-dependencies', 'tauri-frontend-dependencies', 'tauri-ui', 'tauri-resources',
   'tauri-types', 'tauri-frontend-types', 'tauri-frontend-build', 'tauri-contracts',
-  'tauri-provider-guard', 'tauri-native-browser', 'tauri-native-runner',
+  'tauri-actual-runner', 'tauri-provider-guard', 'tauri-native-browser', 'tauri-native-runner',
   'native-fixtures', 'native-gateway-acceptance',
   'gateway-build', 'gateway-image', 'gateway-image-smoke', 'gateway-archive',
 ]);
