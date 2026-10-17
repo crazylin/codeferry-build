@@ -15,6 +15,9 @@ const unixTests = Object.freeze([
   'persistent_shell_retirement_and_shutdown',
   'crash_cleans_active_persistent_shell',
   'crash_fences_and_cleans_independent_shell',
+  'stdin_eof_writes_recoverable_shutdown_receipt_without_replay',
+  'fatal_transport_exit_writes_receipt_and_restarts_without_replay',
+  'fatal_transport_exit_cleans_independent_shell_before_receipt',
 ]);
 
 export function expectedTests(platform) {

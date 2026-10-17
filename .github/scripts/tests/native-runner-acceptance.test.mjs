@@ -43,7 +43,7 @@ test('zero tests, ignored tests, missing named tests and mixed failed reports ar
 test('colored Windows CRLF reports and additional successful selected tests remain valid', () => {
   const windows = report('win32').replaceAll('\n', '\r\n');
   assert.equal(assertNativeRunnerAcceptance(`\x1b[32m${windows}\x1b[0m`, 'win32'), 1);
-  assert.equal(assertNativeRunnerAcceptance(report('linux').replace('8 passed', '9 passed'), 'linux'), 9);
+  assert.equal(assertNativeRunnerAcceptance(report('linux').replace('11 passed', '12 passed'), 'linux'), 12);
 });
 
 test('the exact rebuilt platform binary overrides inherited Runner path and runs ignored tests once', async () => {
