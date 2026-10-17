@@ -250,7 +250,7 @@ jobs:
         env: {GH_TOKEN: '${{ secrets.CODEFERRY_SOURCE_TOKEN }}'}
         run: node .github/scripts/private-cache.mjs restore desktop-${{ matrix.platform }}-${{ matrix.arch }}
       - name: Build and verify host Runner using authoritative source script
-        env: {CODEFERRY_NATIVE_PROFILE: 'release'}
+        env: {CODEFERRY_NATIVE_PROFILE: 'release', CODEFERRY_RUNNER_ONLY: '1'}
         working-directory: source
         run: node ../.github/scripts/ci-task.mjs native-runtime node scripts/native-build.mjs
       - name: Install Linux native WebView build dependencies
