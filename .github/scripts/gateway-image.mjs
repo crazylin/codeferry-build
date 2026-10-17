@@ -75,7 +75,7 @@ export async function stageGatewayImage({ sourceRoot = resolve('source'), tempor
   await cp(join(source, 'public'), join(runtime, 'public'), { recursive: true });
   await copyFile(join(source, 'gateway-rs/LICENSE'), join(runtime, 'LICENSE'));
   await copyFile(join(source, 'upstream/webcodex/LICENSE'), join(runtime, 'WEBCODEX_LICENSE'));
-  await copyFile(join(source, 'desktop/NOTICE.md'), join(runtime, 'CODEFERRY-NOTICE.md'));
+  try { await copyFile(join(source, 'desktop/NOTICE.md'), join(runtime, 'CODEFERRY-NOTICE.md')); } catch { await copyFile(join(source, 'THIRD_PARTY.md'), join(runtime, 'CODEFERRY-NOTICE.md')); }
   const fingerprintLegal = join(runtime, 'licenses', 'lm-detector');
   await mkdir(fingerprintLegal, { recursive: true });
   await copyFile(join(source, 'licenses/lm-detector/LICENSE'), join(fingerprintLegal, 'LICENSE'));
