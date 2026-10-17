@@ -292,3 +292,23 @@ test('workflow restores before Cargo, caches failed build dependencies, never pu
   assert.equal((text.match(/CODEFERRY_CACHE_COMPLETE: \$\{\{ job.status == 'success' \}\}/g) ?? []).length, 3);
   for (const flag of ['CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG', 'CARGO_INCREMENTAL']) assert.match(text, new RegExp(`${flag}: '0'`));
 });
+
+test('desktop trailing newline rewrite and gateway version bumps preserve cache keys', async () => fixture(async root => {
+  await inputs(root);
+  const desktopIdentity = { source: root, bucket: 'desktop-darwin-arm64', platform: 'darwin', arch: 'arm64', part: 'desktop-debug', rustc: 'rustc 1.96.0\nhost: aarch64-apple-darwin' };
+  await writeFile(join(root, 'desktop-tauri/src-tauri/Cargo.toml'), desktopManifest('0.2.51').trimEnd());
+  await writeFile(join(root, 'desktop-tauri/src-tauri/Cargo.lock'), desktopLock('0.2.51'));
+  const withoutTrailingNewline = await cacheKey(desktopIdentity);
+  await writeFile(join(root, 'desktop-tauri/src-tauri/Cargo.toml'), desktopManifest('0.2.51'));
+  assert.equal(await cacheKey(desktopIdentity), withoutTrailingNewline);
+
+  const gatewayManifest = v => desktopManifest(v).replace('codeferry-desktop', 'codeferry-gateway');
+  const gatewayLock = v => desktopLock(v).replace('codeferry-desktop', 'codeferry-gateway');
+  await writeFile(join(root, 'gateway-rs/Cargo.toml'), gatewayManifest('0.3.12'));
+  await writeFile(join(root, 'gateway-rs/Cargo.lock'), gatewayLock('0.3.12'));
+  const gatewayIdentity = { source: root, bucket: 'gateway-linux-x64', platform: 'linux', arch: 'x64', part: 'gateway-release', rustc: 'rustc 1.96.0\nhost: x86_64-unknown-linux-gnu' };
+  const gwBefore = await cacheKey(gatewayIdentity);
+  await writeFile(join(root, 'gateway-rs/Cargo.toml'), gatewayManifest('0.3.13'));
+  await writeFile(join(root, 'gateway-rs/Cargo.lock'), gatewayLock('0.3.13'));
+  assert.equal(await cacheKey(gatewayIdentity), gwBefore);
+}));

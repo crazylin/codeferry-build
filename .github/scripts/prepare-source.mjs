@@ -16,7 +16,7 @@ import { lstat, readdir, utimes } from 'node:fs/promises';
 
 async function normalizeTreeMtime(dir, epoch) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name === 'target' || entry.name === 'node_modules') continue;
+    if (entry.name === 'target' || entry.name === 'node_modules' || entry.name === '.git') continue;
     const full = resolve(dir, entry.name);
     const stat = await lstat(full);
     if (stat.isSymbolicLink()) continue;
@@ -56,6 +56,12 @@ const baselineEpoch = Number.parseInt(
 );
 if (Number.isFinite(baselineEpoch) && baselineEpoch > 0) {
   await normalizeTreeMtime(upstreamRoot, baselineEpoch);
+  for (const subdir of ['gateway-rs', 'desktop-tauri/src-tauri', 'crates']) {
+    try { await normalizeTreeMtime(resolve(root, subdir), baselineEpoch); } catch {}
+  }
+  for (const rel of ['upstream/baseline.json', 'upstream/remotemcp.patch']) {
+    try { await utimes(resolve(root, rel), baselineEpoch, baselineEpoch); } catch {}
+  }
 }
 const sourceEpoch = Number.parseInt(
   execFileSync('git', ['show', '-s', '--format=%ct', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),

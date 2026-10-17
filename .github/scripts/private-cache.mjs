@@ -60,12 +60,13 @@ async function safeParents(root, relative, create = false) {
  * Cargo fingerprints still rebuild this package after a version change. A format
  * outside this narrow Cargo-generated convention is a safe cache miss.
  */
-export function normalizeDesktopInputs(manifestBytes, lockBytes) {
+export function normalizeApplicationInputs(manifestBytes, lockBytes, expectedName = 'codeferry-desktop') {
   const invalid = () => fail('PRIVATE_CACHE_DESKTOP_VERSION_AMBIGUOUS');
   const decode = bytes => {
     let value; try { value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); } catch { invalid(); }
     if (value.includes('"""') || value.includes("'''")) invalid();
-    return value;
+    value = value.replace(/\r\n/g, '\n');
+    return value.endsWith('\n') ? value : value + '\n';
   };
   const rows = value => Array.from(value.matchAll(/[^\n]+(?:\n|$)|\n/g), row => ({
     text: row[0].replace(/\r?\n$/, ''), offset: row.index,
@@ -98,7 +99,7 @@ export function normalizeDesktopInputs(manifestBytes, lockBytes) {
       else manifestVersion = { ...value, offset: row.offset };
     } else if (row.text.trimEnd().endsWith('[') || row.text.trimEnd().endsWith('{')) invalid();
   }
-  if (manifestName !== 'codeferry-desktop' || !manifestVersion || !version(manifestVersion.value)) invalid();
+  if (manifestName !== expectedName || !manifestVersion || !version(manifestVersion.value)) invalid();
   const blocks = []; let current; let array = false; let lockHeader = false;
   for (const row of lockRows) {
     if (blank(row.text)) continue;
@@ -123,7 +124,7 @@ export function normalizeDesktopInputs(manifestBytes, lockBytes) {
     current.keys.add(value.key); current[value.key] = { ...value, offset: row.offset };
   }
   if (array || blocks.some(block => !block.name || !block.version || !version(block.version.value))) invalid();
-  const applications = blocks.filter(block => block.name.value === 'codeferry-desktop');
+  const applications = blocks.filter(block => block.name.value === expectedName);
   if (applications.length !== 1 || applications[0].keys.has('source') || applications[0].keys.has('checksum') ||
       applications[0].keys.has('replace') || applications[0].version.value !== manifestVersion.value) invalid();
   const replace = (text, value) => {
@@ -131,6 +132,12 @@ export function normalizeDesktopInputs(manifestBytes, lockBytes) {
     return text.slice(0, start) + '"__CODEFERRY_APPLICATION_VERSION__"' + text.slice(start + value.literal.length);
   };
   return { manifest: Buffer.from(replace(manifest, manifestVersion)), lock: Buffer.from(replace(lock, applications[0].version)) };
+}
+export function normalizeDesktopInputs(manifestBytes, lockBytes) {
+  return normalizeApplicationInputs(manifestBytes, lockBytes, 'codeferry-desktop');
+}
+export function normalizeGatewayInputs(manifestBytes, lockBytes) {
+  return normalizeApplicationInputs(manifestBytes, lockBytes, 'codeferry-gateway');
 }
 export async function cacheKey({ source, bucket, platform = process.platform, arch = process.arch,
   part = partsFor(bucket)[0], rustc, imageOS = process.env.ImageOS ?? '', imageVersion = process.env.ImageVersion ?? '',
@@ -151,6 +158,15 @@ export async function cacheKey({ source, bucket, platform = process.platform, ar
     const base = 'desktop-tauri/src-tauri/';
     const normalized = normalizeDesktopInputs(values.get(base + 'Cargo.toml'), values.get(base + 'Cargo.lock'));
     values.set(base + 'Cargo.toml', normalized.manifest); values.set(base + 'Cargo.lock', normalized.lock);
+  }
+  if (part.startsWith('gateway-')) {
+    const base = 'gateway-rs/';
+    const rawManifest = values.get(base + 'Cargo.toml');
+    const rawLock = values.get(base + 'Cargo.lock');
+    if (rawManifest.includes(Buffer.from('[package]')) && rawLock.includes(Buffer.from('[[package]]'))) {
+      const normalized = normalizeGatewayInputs(rawManifest, rawLock);
+      values.set(base + 'Cargo.toml', normalized.manifest); values.set(base + 'Cargo.lock', normalized.lock);
+    }
   }
   const inputs = Array.from(values, ([name, bytes]) => [name, hash(bytes)]);
   return hash(JSON.stringify({ schema: SCHEMA, bucket, part, platform, arch, rustc, imageOS, imageVersion, compileFlags, inputs }));
