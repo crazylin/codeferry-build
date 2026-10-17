@@ -215,6 +215,56 @@ test('gateway-only publication does not require desktop health and desktop-only 
  });
 });
 
+test('complete private draft can publish exactly the selected desktop or gateway set',async()=>{
+ for(const scope of ['desktop','gateway']) await publicationFixture(async f=>{
+  Object.assign(f.environment,{VERIFY_ONLY:'false',RELEASE_SCOPE:scope,CODEFERRY_PUBLISH_KEY:'fixture-not-a-real-publish-key'});
+  await f.run();assert.equal(f.calls.length,scope==='desktop'?5:1);
+  assert.ok(f.calls.every(call=>call.metadata.component===scope&&call.deploy===false));
+  assert.deepEqual(f.events,scope==='desktop'?['health','publish_desktop','publish_desktop','publish_desktop','publish_desktop','publish_desktop']:['publish_gateway']);
+  assert.equal(f.output.at(-1),'SERVER_RELEASE_SET_COMPLETE');
+ });
+});
+
+test('selected verification-only validates the complete private draft without loading a publisher',async()=>{
+ for(const scope of ['desktop','gateway']) await publicationFixture(async f=>{
+  f.environment.RELEASE_SCOPE=scope;
+  await f.run({loadPublisher:undefined});assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.healthCalls,[]);assert.deepEqual(f.output,['RELEASE_SET_VERIFIED']);
+ });
+});
+
+test('corrupt excluded components still block selected publication before publisher access',async()=>{
+ const mutations=[
+  ['desktop',async f=>writeFile(join(f.assetDirectory,records().find(row=>row.component==='gateway').filename),'changed gateway')],
+  ['gateway',async f=>writeFile(join(f.assetDirectory,records()[0].filename),'changed desktop')],
+  ['gateway',async f=>{const path=join(f.assetDirectory,records()[1].filename+'.metadata.json');const row=JSON.parse(await readFile(path,'utf8'));row.updaterSignature=signedFixture.signature.slice(1);await writeFile(path,JSON.stringify(row));}],
+  ['desktop',async f=>{const path=join(f.assetDirectory,records().find(row=>row.component==='gateway').filename+'.metadata.json');const row=JSON.parse(await readFile(path,'utf8'));row.sourceCommit='c'.repeat(40);await writeFile(path,JSON.stringify(row));}],
+ ];
+ for(const [scope,mutate] of mutations) await publicationFixture(async f=>{
+  Object.assign(f.environment,{VERIFY_ONLY:'false',RELEASE_SCOPE:scope,CODEFERRY_PUBLISH_KEY:'fixture-not-a-real-publish-key'});await mutate(f);
+  await assert.rejects(f.run());assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.healthCalls,[]);assert.deepEqual(f.output,[]);
+ });
+});
+
+test('selected publication refuses incomplete mixed sets unknown components and extra files',async()=>{
+ const mutations=[
+  async f=>{const row=records()[0];await rm(join(f.assetDirectory,row.filename));await rm(join(f.assetDirectory,row.filename+'.metadata.json'));},
+  async f=>{const row=records().find(row=>row.component==='gateway');await rm(join(f.assetDirectory,row.filename+'.metadata.json'));},
+  async f=>{const path=join(f.assetDirectory,records().find(row=>row.component==='gateway').filename+'.metadata.json');const row=JSON.parse(await readFile(path,'utf8'));row.component='unknown';await writeFile(path,JSON.stringify(row));},
+  async f=>writeFile(join(f.assetDirectory,'unexpected.txt'),'extra'),
+ ];
+ for(const scope of ['desktop','gateway']) for(const mutate of mutations) await publicationFixture(async f=>{
+  Object.assign(f.environment,{VERIFY_ONLY:'false',RELEASE_SCOPE:scope,CODEFERRY_PUBLISH_KEY:'fixture-not-a-real-publish-key'});await mutate(f);
+  await assert.rejects(f.run());assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.healthCalls,[]);assert.deepEqual(f.output,[]);
+ });
+});
+
+test('invalid requested publication scope is refused even for complete verification-only drafts',async()=>{
+ for(const scope of ['invalid','', 'Desktop']) await publicationFixture(async f=>{
+  f.environment.RELEASE_SCOPE=scope;
+  await assert.rejects(f.run(),/RELEASE_BUILD_CONFIGURATION_INVALID/);assert.equal(f.loads,0);assert.deepEqual(f.calls,[]);assert.deepEqual(f.output,[]);
+ });
+});
+
 test('gateway readiness checks only the fixed HTTPS authority or explicit literal loopback, with no redirects or credentials',async()=>{
  const calls=[];const transport=async(...args)=>{calls.push(args);return Response.json({product:'CodeFerry',status:'ok',engine:'gateway-rs',version:options.gatewayVersion});};
  await requireReadyGateway(options.gatewayVersion,{transport});assert.equal(String(calls[0][0]),publicationOrigin+'/healthz');
