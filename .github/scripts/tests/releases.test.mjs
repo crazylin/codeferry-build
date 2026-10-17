@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir, symlink, realpath } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expectedMetadata, artifactName, writeMetadata, verifyTauriSignature } from '../assets.mjs';
-import { requireProductionEngine, validateReleaseSet, verificationOnly, runPublication, requireReadyGateway, publicationOrigin } from '../publish-server.mjs';
+import { requireProductionEngine, validateReleaseSet, verificationOnly, runPublication, requireReadyGateway, publicationOrigin, publicationFailure } from '../publish-server.mjs';
 import { resolveGatewayBinary } from '../gateway-image.mjs';
 const sha='a'.repeat(40), hash='b'.repeat(64);
 const options={sourceSha:sha,desktopVersion:'0.2.0',gatewayVersion:'0.3.0'};
@@ -181,6 +181,28 @@ test('gateway deployment must complete before the health check or any desktop pu
  assert.deepEqual(events,['start_gateway']);finishDeployment();await execution;
  assert.deepEqual(events,['start_gateway','gateway_deployed','health','start_desktop','start_desktop','start_desktop','start_desktop','start_desktop']);
 }));
+
+test('failed gateway deployment retains safe diagnostics and blocks health and desktop publication',async()=>publicationFixture(async f=>{
+ Object.assign(f.environment,{VERIFY_ONLY:'false',CODEFERRY_PUBLISH_KEY:'fixture-not-a-real-publish-key',DEPLOY_GATEWAY:'true'});
+ const jobId='10000000-0000-4000-8000-000000000003';let publications=0;
+ const failure=Object.assign(Error('private response body and credential'),{code:'PUBLISH_DEPLOY_FAILED',stage:'deployment_poll',jobId,status:'failed',errorCode:'DEPLOY_MIGRATION_REVIEW_REQUIRED',response:'private raw body'});
+ await assert.rejects(f.run({loadPublisher:async()=>({publishArtifact:async call=>{publications++;assert.equal(call.metadata.component,'gateway');throw failure;}})}),error=>{
+  assert.equal(error,failure);
+  assert.deepEqual(publicationFailure(error),{error:'PUBLISH_DEPLOY_FAILED',stage:'deployment_poll',jobId,status:'failed',errorCode:'DEPLOY_MIGRATION_REVIEW_REQUIRED'});
+  return true;
+ });
+ assert.equal(publications,1);assert.equal(f.healthCalls.length,0);assert.deepEqual(f.output,[]);
+}));
+
+test('publication failure output excludes messages and invalid deployment fields',()=>{
+ for(const errorCode of ['DEPLOY_SECRET\ncredential','DEPLOY_SECRET\n','DEPLOY_SECRET\r','DEPLOY_SECRET\u2028','DEPLOY_/private/path','RELEASE_KEY_REVOKED','DEPLOY_lowercase','DEPLOY_'+'A'.repeat(81),{message:'private'}]) {
+  const error=Object.assign(Error('credential and arbitrary private server diagnostic'),{code:'PUBLISH_DEPLOY_FAILED',stage:'private/worker/path',jobId:'private credential',status:'private status',errorCode});
+  assert.deepEqual(publicationFailure(error),{error:'PUBLISH_DEPLOY_FAILED'});
+ }
+ assert.deepEqual(publicationFailure(Object.assign(Error('private'),{code:'x'.repeat(101)})),{error:'SERVER_PUBLICATION_FAILED'});
+ assert.deepEqual(publicationFailure({code:'PUBLISH_DEPLOY_FAILED\n',jobId:'10000000-0000-4000-8000-000000000003\n'}),{error:'SERVER_PUBLICATION_FAILED'});
+ assert.deepEqual(publicationFailure(undefined),{error:'SERVER_PUBLICATION_FAILED'});
+});
 
 test('gateway-only publication does not require desktop health and desktop-only requires an already ready gateway',async()=>{
  for(const scope of ['gateway','desktop']) await publicationFixture(async f=>{
