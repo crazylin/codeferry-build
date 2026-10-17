@@ -83,15 +83,21 @@ export async function runPublication({environment=process.env,sourceRoot=resolve
     if(actual.size!==row.size||actual.sha256!==row.sha256) throw Error('RELEASE_ASSET_CHANGED');
     if(row.updaterSignature) await verifyTauriSignature(file,row.updaterSignature,pub,row.version); records.push(row);
   }
-  validateReleaseSet(records,{sourceSha,desktopVersion,gatewayVersion,scope:environment.RELEASE_SCOPE??'all'});
+  const scope=environment.RELEASE_SCOPE??'all';
+  // A saved draft may contain both complete components. Verify every downloaded
+  // artifact before selecting this publication's scope, including excluded files.
+  const downloadedScope=records.some(row=>row.component==='gateway')&&records.some(row=>row.component==='desktop')?'all':scope;
+  validateReleaseSet(records,{sourceSha,desktopVersion,gatewayVersion,scope:downloadedScope});
   if(files.length!==records.length*2) throw Error('RELEASE_ASSET_SET_INVALID');
+  const selected=records.filter(row=>scope==='all'||row.component===scope);
+  validateReleaseSet(selected,{sourceSha,desktopVersion,gatewayVersion,scope});
   // Verification uses the same complete set, byte hashes and updater signatures
   // as publication. Do not even load the effectful publisher for a build draft.
   if(verifyOnly) { log('RELEASE_SET_VERIFIED'); return; }
   const {publishArtifact}=await loadPublisher(source);
-  records.sort((a,b)=>(a.component==='gateway'?0:1)-(b.component==='gateway'?0:1)||a.filename.localeCompare(b.filename));
+  selected.sort((a,b)=>(a.component==='gateway'?0:1)-(b.component==='gateway'?0:1)||a.filename.localeCompare(b.filename));
   let desktopReady=false;
-  for(const row of records) {
+  for(const row of selected) {
     if(row.component==='desktop'&&!desktopReady) {
       const retries=environment.GATEWAY_HEALTH_RETRIES?parseInt(environment.GATEWAY_HEALTH_RETRIES,10):0;
       await requireReadyGateway(gatewayVersion,{origin:publicationOrigin,transport:healthTransport,retries});desktopReady=true;
