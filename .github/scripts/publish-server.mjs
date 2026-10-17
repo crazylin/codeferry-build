@@ -3,6 +3,17 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { identity, artifactName, targetFor, verifyTauriSignature } from './assets.mjs';
 export const publicationOrigin='https://codeferry.link';
+// Reject a final line break as well as partial matches of the bounded fields.
+const matchesExactly=(pattern,value)=>typeof value==='string'&&pattern.exec(value)?.[0]===value;
+export function publicationFailure(error) {
+  return {
+    error:matchesExactly(/^[A-Z_0-9]{1,100}$/,error?.code)?error.code:'SERVER_PUBLICATION_FAILED',
+    ...(['deployment_submit','deployment_poll'].includes(error?.stage)?{stage:error.stage}:{}),
+    ...(matchesExactly(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,error?.jobId)?{jobId:error.jobId}:{}),
+    ...(['pending','running','succeeded','failed','outcome_unknown'].includes(error?.status)?{status:error.status}:{}),
+    ...(matchesExactly(/^DEPLOY_[A-Z_]{1,80}$/,error?.errorCode)?{errorCode:error.errorCode}:{}),
+  };
+}
 export function requireProductionEngine(engine='tauri') { if(engine!=='tauri') throw Error('CLIENT_ENGINE_INVALID'); }
 export function validateReleaseSet(records,{sourceSha,desktopVersion,gatewayVersion,scope='all'}) {
   const version=/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
@@ -91,4 +102,4 @@ export async function runPublication({environment=process.env,sourceRoot=resolve
   }
   log('SERVER_RELEASE_SET_COMPLETE');
 }
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) runPublication().catch(error=>{console.error(typeof error.code==='string'&&/^[A-Z_0-9]+$/.test(error.code)?error.code:'SERVER_PUBLICATION_FAILED');process.exitCode=1;});
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) runPublication().catch(error=>{console.error(JSON.stringify(publicationFailure(error)));process.exitCode=1;});
